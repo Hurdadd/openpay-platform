@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: openpay-postgres
+    environment:
+      POSTGRES_USER: openpay
+      POSTGRES_PASSWORD: openpay
+      POSTGRES_DB: openpay
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: openpay-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: "openpay-kafka-cluster-001"
+    ports:
+      - "9092:9092"
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    container_name: openpay-kafka-init
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server kafka:9092 --topic payment.events --partitions 3 --replication-factor 1 --if-not-exists
+
+volumes:
+  pgdata:
