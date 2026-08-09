@@ -7,10 +7,11 @@ dependencies {
 
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
-
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.4.0")
+    implementation("org.springframework:spring-aop:7.0.8")
 
     implementation(project(":payment-orchestrator:application"))
     compileOnly("org.projectlombok:lombok:1.18.46")
