@@ -3,24 +3,12 @@ spring:
     name: ledger-service
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/openpay_ledger}
-    username: ${DB_USERNAME:openpay}
-    password: ${DB_PASSWORD:openpay}
+    url: ${LEDGER_DB_URL:jdbc:postgresql://localhost:5432/openpay_ledger}
+    username: ${LEDGER_DB_USERNAME:openpay}
+    password: ${LEDGER_DB_PASSWORD:openpay}
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-      acks: all
-      retries: 7
-      properties:
-        enable.idempotence: true
-        max.in.flight.requests.per.connection: 5
-        delivery.timeout.ms: 120000
-        request.timeout.ms: 30000
-        linger.ms: 5
-        batch.size: 32768
     consumer:
       group-id: ledger-service
       auto-offset-reset: earliest

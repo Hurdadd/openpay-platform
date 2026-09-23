@@ -1,3 +1,6 @@
 spring:
   application:
     name: psp-gateway
+
+server:
+  port: 8082
