@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,17 +64,63 @@ class LedgerRepositoryTest {
     }
 
     @Test
+    void account_identity_matches_database_uniqueness() {
+        var payable = repository.ensureAccount("merchant:m-1", "MERCHANT_PAYABLE", "IRR");
+        var payableAgain = repository.ensureAccount("merchant:m-1", "MERCHANT_PAYABLE", "IRR");
+        var clearing = repository.ensureAccount("merchant:m-1", "CLEARING", "IRR");
+
+        assertEquals(payable, payableAgain);
+        assertNotEquals(payable, clearing);
+        assertEquals(2, LedgerTestSupport.count(jdbc, "account"));
+    }
+
+    @Test
     void unbalanced_postings_cannot_persist() {
         var clearing = repository.ensureAccount("psp_clearing", "CLEARING", "IRR");
         var entryId = UUID.randomUUID();
-        jdbc.update("INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
-                entryId, "raw", "raw-1", "IRR");
 
         var thrown = assertThrows(DataAccessException.class, () ->
-                jdbc.update("INSERT INTO posting (id, journal_entry_id, account_id, amount) VALUES (?, ?, ?, ?)",
-                        UUID.randomUUID(), entryId, clearing, 10000));
+                LedgerTestSupport.inTransaction(jdbc, () -> {
+                    jdbc.update(
+                            "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
+                            entryId, "raw", "raw-1", "IRR");
+                    jdbc.update(
+                            "INSERT INTO posting (id, journal_entry_id, account_id, amount) VALUES (?, ?, ?, ?)",
+                            UUID.randomUUID(), entryId, clearing, 10000);
+                })
+        );
 
-        assertTrue(thrown.getMessage().contains("not balanced"));
+        assertTrue(thrown.getMessage().contains("at least two postings")
+                || thrown.getMessage().contains("balanced"));
+    }
+
+    @Test
+    void journal_entry_without_postings_cannot_commit() {
+        var entryId = UUID.randomUUID();
+
+        assertThrows(DataAccessException.class, () ->
+                LedgerTestSupport.inTransaction(jdbc, () ->
+                        jdbc.update(
+                                "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
+                                entryId, "empty", "empty-1", "IRR"))
+        );
+    }
+
+    @Test
+    void single_zero_posting_is_not_valid_double_entry() {
+        var clearing = repository.ensureAccount("psp_clearing", "CLEARING", "IRR");
+        var entryId = UUID.randomUUID();
+
+        assertThrows(DataAccessException.class, () ->
+                LedgerTestSupport.inTransaction(jdbc, () -> {
+                    jdbc.update(
+                            "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
+                            entryId, "zero", "zero-1", "IRR");
+                    jdbc.update(
+                            "INSERT INTO posting (id, journal_entry_id, account_id, amount) VALUES (?, ?, ?, ?)",
+                            UUID.randomUUID(), entryId, clearing, 0);
+                })
+        );
     }
 
     @Test

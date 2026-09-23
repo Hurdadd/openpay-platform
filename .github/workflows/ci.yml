@@ -13,5 +13,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Build payment-orchestrator adapter
+        run: ./gradlew :payment-orchestrator:adapter:build --console=plain
       - name: Build ledger-service (includes money-path grep check + Testcontainers tests)
         run: ./gradlew :ledger-service:adapter:build --console=plain

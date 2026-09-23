@@ -17,42 +17,51 @@ import jakarta.annotation.PreDestroy;
 import lombok.Getter;
 
 import java.time.Duration;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
-public class ResilientPspClient implements PspClient
-{
+public class ResilientPspClient implements PspClient {
+
     private final PspClient pspClient;
     private final Retry retry;
+
     @Getter
     private final CircuitBreaker circuitBreaker;
-    private final ScheduledExecutorService scheduledThreadPool =
-            Executors.newScheduledThreadPool(2);
-    private final ExecutorService vtExecutor =
-            Executors.newVirtualThreadPerTaskExecutor();
+
+    private final ExecutorService vtExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final TimeLimiter timeLimiter;
 
-
     public ResilientPspClient(PspClient pspClient) {
-       RetryConfig retryConfig = RetryConfig.custom()
+        RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(5)
-               .intervalFunction(IntervalFunction.ofExponentialRandomBackoff(Duration.ofMillis(100) , 0.2 , 0.5))
-               .ignoreExceptions(PspClientException.class)
+                .intervalFunction(
+                        IntervalFunction.ofExponentialRandomBackoff(
+                                Duration.ofMillis(100),
+                                0.2,
+                                0.5
+                        )
+                )
+                .ignoreExceptions(PspClientException.class)
                 .build();
+
         CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
                 .failureRateThreshold(50)
                 .waitDurationInOpenState(Duration.ofSeconds(10))
                 .permittedNumberOfCallsInHalfOpenState(10)
-                .slidingWindow(10 , 10 , CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindow(10, 10, CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .build();
+
         TimeLimiterConfig timeLimiterConfig = TimeLimiterConfig.custom()
                 .timeoutDuration(Duration.ofMillis(500))
                 .build();
+
         this.retry = Retry.of("pspClientRetry", retryConfig);
         this.circuitBreaker = CircuitBreaker.of("pspClientCircuitBreaker", circuitBreakerConfig);
-        this.timeLimiter = TimeLimiter.of("pspLimiter",timeLimiterConfig);
+        this.timeLimiter = TimeLimiter.of("pspLimiter", timeLimiterConfig);
         this.pspClient = pspClient;
-
     }
 
     @Override
@@ -84,12 +93,9 @@ public class ResilientPspClient implements PspClient
             throw new PspException(failureMessage, e);
         }
     }
+
     @PreDestroy
     void shutdown() {
-        scheduledThreadPool.shutdown();
         vtExecutor.shutdown();
     }
-
-
-
 }

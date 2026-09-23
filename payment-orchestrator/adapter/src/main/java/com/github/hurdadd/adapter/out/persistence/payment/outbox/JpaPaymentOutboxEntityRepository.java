@@ -10,13 +10,16 @@ import java.util.UUID;
 @Repository
 public interface JpaPaymentOutboxEntityRepository extends JpaRepository<PaymentOutboxEntity, UUID> {
 
-    @Query(value =
-            """
-            SELECT p FROM PaymentOutboxEntity p
-            WHERE p.published = FALSE ORDER BY p.createdAt ASC
-            LIMIT 100 FOR UPDATE SKIP LOCKED
-           """
-            , nativeQuery = true
+    @Query(
+            value = """
+                    SELECT *
+                    FROM payment_outbox
+                    WHERE published = FALSE
+                    ORDER BY created_at ASC
+                    LIMIT 100
+                    FOR UPDATE SKIP LOCKED
+                    """,
+            nativeQuery = true
     )
     List<PaymentOutboxEntity> findUnpublished();
 }
