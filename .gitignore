@@ -8,3 +8,17 @@ build/
 
 # OS
 .DS_Store
+
+# AI / mentor scratch — local only, never push
+.freebuff/
+MEMORY.MD
+PRIVATE-DOC.md
+openpay-platform-graph.html
+docs/SPEC.md
+docs/PROJECT_MAP.md
+docs/README.md
+docs/flow.md
+docs/classes/
+docs/ledger-kafka-diagram.html
+docs/PAY-6-STATE-*.md
+docs/PAY-6-learnings-*.md
