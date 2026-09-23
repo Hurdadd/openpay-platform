@@ -22,11 +22,13 @@ public class JdbcLedgerRepository implements LedgerRepository {
         UUID entryId = UUID.randomUUID();
 
         int inserted = jdbcTemplate.update(
-                "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING",
+                "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?) " +
+                        "ON CONFLICT (idempotency_key) DO NOTHING",
                 entryId,
                 entry.description(),
                 idempotencyKey,
-                entry.currency().getCurrencyCode());
+                entry.currency().getCurrencyCode()
+        );
 
         if (inserted == 0) {
             return;
@@ -38,20 +40,27 @@ public class JdbcLedgerRepository implements LedgerRepository {
                     UUID.randomUUID(),
                     entryId,
                     UUID.fromString(posting.accountId()),
-                    posting.amount());
+                    posting.amount()
+            );
         }
     }
 
     @Override
     public UUID ensureAccount(String name, String type, String currency) {
         UUID id = UUID.nameUUIDFromBytes(
-                ("account:" + type + ":" + name + ":" + currency).getBytes(StandardCharsets.UTF_8));
+                ("account:" + type + ":" + name + ":" + currency)
+                        .getBytes(StandardCharsets.UTF_8)
+        );
+
         jdbcTemplate.update(
-                "INSERT INTO account (id, name, type, currency) VALUES (?, ?, ?, ?) ON CONFLICT (name, currency) DO NOTHING",
+                "INSERT INTO account (id, name, type, currency) VALUES (?, ?, ?, ?) " +
+                        "ON CONFLICT (name, type, currency) DO NOTHING",
                 id,
                 name,
                 type,
-                currency);
+                currency
+        );
+
         return id;
     }
 }

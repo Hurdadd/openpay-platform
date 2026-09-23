@@ -1,7 +1,7 @@
 # ADR-0005: HMAC verification, replay protection, and idempotency are three separate concerns
 
 ## Status
-Accepted (PAY-4)
+Accepted (PAY-4), hardened after security review
 
 ## Context
 PSP webhooks are inherently:
@@ -12,42 +12,45 @@ PSP webhooks are inherently:
 - **Unordered** — retries, PSP-side queueing, and network reordering mean a stale status can arrive
   after a newer one.
 
-These are three different failure modes and need three different defenses — conflating them (e.g.
-"idempotency covers replay too") leaves gaps.
+Authentication, replay protection, and business idempotency are separate failure modes.
 
 ## Decision
-Three independent layers, applied in this order in `PspCallbackController`:
+Three independent layers are applied in this order in `PspCallbackController`:
 
-1. **HMAC signature verification** (`HmacVerifier`, constant-time compare via `MessageDigest.isEqual`)
-   — proves the request body came from a party that knows the shared secret, over the *exact raw bytes*
-   received (verified before JSON parsing, so a tamper that happens to still parse doesn't sneak past).
-   Failure → `401`, and nothing downstream ever sees the payload.
+1. **HMAC signature verification** (`HmacVerifier`, constant-time compare via
+   `MessageDigest.isEqual`) authenticates one canonical byte sequence:
 
-2. **Replay protection** (`ReplayGuard` / `RedisReplayGuard`) — a signed, well-formed message can still
-   be the *same* message delivered twice. Redis `SETIFABSENT` on a `nonce`-derived key (5-minute TTL,
-   matching the window in which a timestamp is still considered valid) makes "have I seen this nonce
-   before" atomic — no read-then-write race between concurrent callback deliveries. A timestamp outside
-   the window is also treated as "replay" (rejected as a no-op), which additionally bounds how long a
-   captured-and-replayed request stays exploitable even if the nonce store were somehow bypassed.
+   ```text
+   timestamp + "." + nonce + "." + rawBody
+   ```
 
-3. **Idempotent handling** (`PspCallbackService.handle`) — even without a replay attack, the *business
-   effect* of processing the same verified, non-replayed status twice must be a no-op. This is enforced
-   by checking the transition is still legal (`PaymentStatus.canTransitionTo`) before applying it: if the
-   payment is already at the target status, or has moved past it, the callback is silently absorbed.
+   The JSON body remains raw bytes until verification completes. Timestamp and nonce are part of the
+   signed material as well: signing only the body would allow an attacker who captured a valid
+   body/signature pair to supply a fresh timestamp and nonce and bypass the replay layer. Unknown PSP
+   ids and malformed hex signatures are treated as verification failures rather than server errors.
+
+2. **Replay protection** (`ReplayGuard` / `RedisReplayGuard`) uses Redis `SETIFABSENT` with a
+   five-minute TTL. Keys are namespaced by PSP:
+
+   ```text
+   replay:<pspId>:nonce:<nonce>
+   ```
+
+   This avoids collisions when two independent PSPs happen to use the same nonce. A timestamp outside
+   the five-minute acceptance window is rejected before Redis.
+
+3. **Idempotent handling** (`PspCallbackService.handle`) checks the aggregate transition before
+   applying it. A duplicate status or an out-of-order status that is no longer legal becomes a no-op.
 
 ## Why not just layer 3?
-Idempotency alone (checking current-vs-target status) doesn't stop an attacker replaying a captured,
-validly-signed "AUTHORIZED" callback to probe timing or hammer the endpoint — the replay guard rejects
-it before it ever reaches the payment lookup. And idempotency alone doesn't verify authenticity at all —
-an unsigned or forged request would happily be "idempotent" too. All three layers are required; none
-is redundant with another.
+Business idempotency cannot prove authenticity and should not be used as a replay-control mechanism.
+The HMAC protects the callback's authenticated data, the nonce/timestamp bounds replay, and the state
+machine protects the payment from repeated/out-of-order business effects.
 
 ## Consequences
-- An unknown `pspReference` (verified + non-replayed, but no matching payment) still returns `200 OK` —
-  by the time signature and replay checks pass, we trust the PSP sent this; a payment record that
-  doesn't exist yet (created after this callback, PAY-4's reconciler window covers exactly this gap) or
-  that belongs to a different environment is not a client error worth retrying over. See
-  [ADR-0006](0006-reconciler-polling-design.md) for the backstop this leans on.
-- The controller reads the body as raw `byte[]` specifically so the exact bytes the PSP signed are what
-  gets HMAC-verified — Spring's automatic `@RequestBody` deserialize-then-reserialize would not
-  guarantee byte-for-byte fidelity with what was actually signed.
+- Any PSP implementation that sends callbacks must compute its signature over the same canonical
+  sequence: timestamp, dot, nonce, dot, then the exact body bytes.
+- An unknown `pspReference` that is otherwise authenticated is acknowledged with `200 OK`; the
+  reconciler is the recovery path for local payment state.
+- The controller keeps `@RequestBody` as raw `byte[]` so verification covers exactly what arrived on
+  the wire.

@@ -1,29 +1,35 @@
 spring:
   application:
-    name: open-psp
+    name: payment-orchestrator
+
+  datasource:
+    url: ${PAYMENT_DB_URL:jdbc:postgresql://localhost:5432/openpay}
+    username: ${PAYMENT_DB_USERNAME:openpay}
+    password: ${PAYMENT_DB_PASSWORD:openpay}
+
   data:
     redis:
-      host: localhost
-      port: 6379
-      password: 1234
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:openpay-redis}
       timeout: 2000ms
       connect-timeout: 1000ms
 
   kafka:
-
-    bootstrap-servers:
-      localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
 psp:
   secrets:
-    slow-psp: "dev-secret-change-me"
+    slow-psp: ${SLOW_PSP_SECRET:dev-secret-change-me}
 
 reconciler:
   stuck-threshold: 2m
   poll-interval: 30s
   max-age: 24h
 
-
 outbox:
-    kafka:
-      topic: payment-events
+  kafka:
+    topic: payment-events
+
+server:
+  port: 8080
