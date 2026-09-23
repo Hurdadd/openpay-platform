@@ -35,7 +35,7 @@ services:
     command:
       - |
         sleep 10
-        /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server kafka:9092 --topic payment.events --partitions 3 --replication-factor 1 --if-not-exists
+        /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server kafka:9092 --topic payment-events --partitions 3 --replication-factor 1 --if-not-exists
 
 volumes:
   pgdata:
