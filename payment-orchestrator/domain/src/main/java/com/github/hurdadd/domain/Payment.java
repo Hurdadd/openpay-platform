@@ -2,6 +2,7 @@ package com.github.hurdadd.domain;
 
 
 import java.time.Instant;
+import java.util.Objects;
 
 public final class Payment {
 
@@ -18,22 +19,25 @@ public final class Payment {
 
     private long version;
 
-    private Payment(Money money, PaymentId paymentId, MerchantId merchantId, PaymentStatus paymentStatus, Instant createdAt, long version) {
+    private PspReference pspReference;
+
+    private Payment(Money money, PaymentId paymentId, MerchantId merchantId, PaymentStatus paymentStatus, Instant createdAt, long version, PspReference pspReference) {
         this.money = money;
         this.paymentId = paymentId;
         this.merchantId = merchantId;
         this.paymentStatus = paymentStatus;
         this.version = version;
         this.createdAt = createdAt;
+        this.pspReference = pspReference;
     }
 
 
     public static Payment create(Money money , MerchantId merchantId) {
-        return new Payment(money, PaymentId.generate(), merchantId, PaymentStatus.CREATED, Instant.now() , 0);
+        return new Payment(money, PaymentId.generate(), merchantId, PaymentStatus.CREATED, Instant.now() , 0, null);
     }
 
-    public static Payment reconstitute(Money money, PaymentId paymentId, MerchantId merchantId, PaymentStatus paymentStatus, Instant createdAt, long version) {
-        return new Payment(money, paymentId, merchantId, paymentStatus, createdAt , version);
+    public static Payment reconstitute(Money money, PaymentId paymentId, MerchantId merchantId, PaymentStatus paymentStatus, Instant createdAt, long version, PspReference pspReference) {
+        return new Payment(money, paymentId, merchantId, paymentStatus, createdAt , version, pspReference);
     }
     private void transitionTo(PaymentStatus target) {
         if (!this.paymentStatus.canTransitionTo(target)) {
@@ -45,8 +49,12 @@ public final class Payment {
     public void fail(){transitionTo(PaymentStatus.FAILED);}
     public void authorize(){transitionTo(PaymentStatus.AUTHORIZED);}
     public void reverse(){transitionTo(PaymentStatus.REVERSED);}
-    public void markPending(){transitionTo(PaymentStatus.PENDING_PSP);}
     public void settle(){transitionTo(PaymentStatus.SETTLED);}
+
+    public void markPending(PspReference pspReference){
+        transitionTo(PaymentStatus.PENDING_PSP);
+        this.pspReference = Objects.requireNonNull(pspReference, "pspReference cannot be null");
+    }
 
 
     public Money getMoney() {
@@ -71,5 +79,9 @@ public final class Payment {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public PspReference getPspReference() {
+        return pspReference;
     }
 }

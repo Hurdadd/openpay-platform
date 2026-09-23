@@ -22,7 +22,7 @@ public class PaymentTest {
         Payment p = paymentHelper();
         assertEquals(PaymentStatus.CREATED, p.getPaymentStatus());
 
-        p.markPending();
+        p.markPending(new PspReference("psp-ref-1"));
         assertEquals(PaymentStatus.PENDING_PSP, p.getPaymentStatus());
 
         p.authorize();
@@ -35,10 +35,10 @@ public class PaymentTest {
     @Test
     void settled_cannot_go_back_to_pending() {
         Payment p = paymentHelper();
-        p.markPending();
+        p.markPending(new PspReference("psp-ref-1"));
         p.authorize();
         p.settle();
-        assertThrows(IllegalStateException.class, p::markPending);
+        assertThrows(IllegalStateException.class, () -> p.markPending(new PspReference("psp-ref-2")));
 
     }
 

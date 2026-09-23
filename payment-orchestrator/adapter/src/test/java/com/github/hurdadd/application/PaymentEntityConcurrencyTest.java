@@ -2,8 +2,8 @@ package com.github.hurdadd.application;
 
 import com.github.hurdadd.domain.Currency;
 import com.github.hurdadd.domain.PaymentStatus;
-import com.github.hurdadd.adapter.in.persistence.payment.JpaPaymentEntityRepository;
-import com.github.hurdadd.adapter.in.persistence.payment.PaymentEntity;
+import com.github.hurdadd.adapter.out.persistence.payment.JpaPaymentEntityRepository;
+import com.github.hurdadd.adapter.out.persistence.payment.PaymentEntity;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;

@@ -2,13 +2,13 @@ package com.github.hurdadd.application;
 
 import com.github.hurdadd.domain.Currency;
 import com.github.hurdadd.domain.PaymentStatus;
-import com.github.hurdadd.adapter.in.persistence.payment.JpaPaymentEntityRepository;
-import com.github.hurdadd.adapter.in.persistence.payment.PaymentEntity;
+import com.github.hurdadd.adapter.out.persistence.payment.JpaPaymentEntityRepository;
+import com.github.hurdadd.adapter.out.persistence.payment.PaymentEntity;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,8 +38,7 @@ class PaymentEntityTest {
                 .currency(Currency.USD)
                 .build();
 
-        em.persist(paymentEntity);
-        em.flush();
+        repository.saveAndFlush(paymentEntity);
         em.clear();
 
         PaymentEntity a = repository.findById(paymentEntity.getPaymentId()).orElseThrow();
@@ -47,12 +46,10 @@ class PaymentEntityTest {
         PaymentEntity b = repository.findById(paymentEntity.getPaymentId()).orElseThrow();
 
         a.setStatus(PaymentStatus.AUTHORIZED);
-        repository.save(a);
-        em.flush();
+        repository.saveAndFlush(a);
         b.setStatus(PaymentStatus.SETTLED);
-        repository.save(b);
 
-        assertThrows(OptimisticLockException.class, () -> em.flush());
+        assertThrows(ObjectOptimisticLockingFailureException.class, () -> repository.saveAndFlush(b));
     }
 
 
