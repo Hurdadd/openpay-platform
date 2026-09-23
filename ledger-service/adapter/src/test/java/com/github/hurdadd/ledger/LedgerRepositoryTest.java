@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.TransactionSystemException;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.Currency;
@@ -79,7 +80,7 @@ class LedgerRepositoryTest {
         var clearing = repository.ensureAccount("psp_clearing", "CLEARING", "IRR");
         var entryId = UUID.randomUUID();
 
-        var thrown = assertThrows(DataAccessException.class, () ->
+        var thrown = assertThrows(TransactionSystemException.class, () ->
                 LedgerTestSupport.inTransaction(jdbc, () -> {
                     jdbc.update(
                             "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
@@ -90,15 +91,15 @@ class LedgerRepositoryTest {
                 })
         );
 
-        assertTrue(thrown.getMessage().contains("at least two postings")
-                || thrown.getMessage().contains("balanced"));
+        assertTrue(thrown.getRootCause().getMessage().contains("at least two postings")
+                || thrown.getRootCause().getMessage().contains("balanced"));
     }
 
     @Test
     void journal_entry_without_postings_cannot_commit() {
         var entryId = UUID.randomUUID();
 
-        assertThrows(DataAccessException.class, () ->
+        assertThrows(TransactionSystemException.class, () ->
                 LedgerTestSupport.inTransaction(jdbc, () ->
                         jdbc.update(
                                 "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
@@ -111,7 +112,7 @@ class LedgerRepositoryTest {
         var clearing = repository.ensureAccount("psp_clearing", "CLEARING", "IRR");
         var entryId = UUID.randomUUID();
 
-        assertThrows(DataAccessException.class, () ->
+        assertThrows(TransactionSystemException.class, () ->
                 LedgerTestSupport.inTransaction(jdbc, () -> {
                     jdbc.update(
                             "INSERT INTO journal_entry (id, description, idempotency_key, currency) VALUES (?, ?, ?, ?)",
