@@ -12,7 +12,7 @@ From an idempotent payment request to an append-only double-entry ledger.
 [![Kafka](https://img.shields.io/badge/Kafka-3.9_KRaft-6366f1?style=flat-square)](docker-compose.yml)
 [![Status](https://img.shields.io/badge/Status-in_development-d97706?style=flat-square)](#where-the-project-stands)
 
-[Explore the architecture](docs/architecture/README.md) · [Engineering reference](docs/engineering.md) · [Design decisions](docs/adr/README.md) · [فارسی](README.fa.md)
+[Explore the architecture](docs/architecture/README.md) · [Engineering reference](docs/engineering.md) · [Design decisions](docs/adr/README.md)
 
 </div>
 

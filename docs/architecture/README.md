@@ -1,6 +1,6 @@
 # Explore OpenPSP
 
-[Back to the project](../../README.md) · [فارسی](../../README.fa.md)
+[Back to the project](../../README.md)
 
 ![OpenPSP implementation map](openpsp.svg)
 
@@ -8,7 +8,7 @@
 
 Download [`openpsp.html`](openpsp.html) from GitHub using **Download raw file**, then open it in a browser. It is a standalone Archify diagram; viewing it requires no Archify installation or server. Source links require repository access.
 
-Click a component for its details and source references. The diagram includes the current payment, callback, reconciliation, outbox publication and ledger responsibilities. The English labels retain the names used in the code.
+Click a component for its details and source references. The diagram includes the current payment, callback, reconciliation, outbox publication and ledger responsibilities. The labels retain the names used in the code.
 
 ## Read it accurately
 
