@@ -1,10 +1,10 @@
 # OpenPSP — Payment Orchestrator
 
-An open-source payment orchestrator built to answer one question under failure:
+A payment orchestrator (personal project) built to answer one question under failure:
 
 > **When the PSP times out, a callback is lost, or Kafka redelivers, does money get lost or counted twice?**
 
-The design goal is that it doesn't. A payment flows from an idempotent REST API, through an explicit state machine and a resilient PSP adapter, into a transactional outbox, over Kafka, and into a double-entry ledger whose invariants are enforced by the database itself.
+The design goal is that it doesn't, and the failure-injection suite checks that against real containers. A payment flows from an idempotent REST API, through an explicit state machine and a resilient PSP adapter, into a transactional outbox, over Kafka, and into a double-entry ledger whose invariants are enforced by the database itself.
 
 ![Java 27](https://img.shields.io/badge/Java-27-blue) ![Spring Boot 4](https://img.shields.io/badge/Spring%20Boot-4.0-green) ![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-blue) ![Kafka KRaft](https://img.shields.io/badge/Kafka-3.9%20KRaft-black)
 
@@ -13,6 +13,7 @@ The design goal is that it doesn't. A payment flows from an idempotent REST API,
 ## Table of contents
 
 1. [Status — what works today](#status--what-works-today)
+   - [How this was built](#how-this-was-built)
 2. [Architecture](#architecture)
 3. [The money path](#the-money-path)
 4. [Payment state machine](#payment-state-machine)
@@ -43,9 +44,15 @@ This project is in progress. The table is kept honest: a component is ✅ only w
 | PSP adapter — HTTP client, retry, circuit breaker, time limiter | ✅ | `HttpPspClient` (set `psp.base-url`) behind `ResilientPspClient`: `authorize` single attempt (no retry — a timeout is *unknown*), `checkStatus` retried (read-only); proven against a slow PSP in [`PaymentMoneyPathE2eTest`](e2e-tests/src/test/java/com/github/hurdadd/e2e/PaymentMoneyPathE2eTest.java) |
 | HMAC-verified PSP callbacks + Redis replay guard | ✅ | Bad signature → 401, replayed delivery acknowledged but not re-applied; also covered end to end ([`PaymentMoneyPathE2eTest`](e2e-tests/src/test/java/com/github/hurdadd/e2e/PaymentMoneyPathE2eTest.java), scenario 2) |
 | Reconciler for payments stuck in `CREATED`/`PENDING_PSP`/`AUTHORIZED` | ✅ | Settles stale `AUTHORIZED`; per-payment tx + error isolation; selects by `status_changed_at` (ADR-0006) |
-| Transactional outbox → Kafka publisher | ✅ | Transactional outbox to Kafka: state change and event committed atomically; publisher scales with `SKIP LOCKED` |
+| Transactional outbox → Kafka publisher | ✅ | Transactional outbox to Kafka: state change and event committed atomically; multiple publisher instances do not pick the same rows (`FOR UPDATE SKIP LOCKED`) |
 | Double-entry ledger (DB-enforced balance, append-only) | ✅ | Deferred constraint triggers; redelivery test with a crashed consumer |
 | End-to-end failure-injection test | ✅ | [`e2e-tests`](e2e-tests/): both services as containers + Postgres, Kafka, Redis and WireMock as the PSP; PSP timeout → reconciler → ledger → Kafka redelivery → idempotent replay |
+
+### How this was built
+
+I designed the system and made the architectural decisions (service boundary, outbox, DB-enforced ledger invariants, timeout budget — see the [ADRs](docs/adr/README.md)). The first tickets (PAY-2 to PAY-6) I wrote by hand. The later work — the hardening fixes, the PAY-203 create/authorize flow, the failure-injection suite (PAY-305), and the hexagonal module refactor — was implemented with an AI coding agent (Claude Code) under my direction and reviewed by me.
+
+**All diagrams (Mermaid, sequence, UML), the ADRs, this README and the code comments were written with AI assistance.** I review them, but treat them as generated documentation: the tests and the failure-injection suite are the source of truth, not the prose.
 
 ---
 
@@ -675,8 +682,8 @@ published. That produces a duplicate message, which the ledger's unique `idempot
 
 Listed on purpose.
 
-- The create flow does not call the PSP yet, so payments stay `CREATED` until it does.
-- The outbox row is not yet written in the state-change transaction.
+- Never run against a real PSP or real traffic: the PSP is simulated (`SlowPsp`, `FlakyPsp`, WireMock).
+- The reconciler is a polling loop with fixed intervals; there is no alerting or metrics dashboard on stuck payments yet.
 - An *early* callback (e.g. `SETTLED` while still `PENDING_PSP`) is acknowledged and dropped instead of being rejected for redelivery.
 - The replay nonce is recorded before processing, so a failed processing attempt cannot be retried with the same nonce.
 - The ledger consumer has no dead-letter topic; a poison message is logged and skipped after the default retries.

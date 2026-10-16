@@ -1,7 +1,7 @@
 # ADR-0006: Reconciler polling design — rate, backoff, age cap
 
 ## Status
-Accepted (PAY-4)
+Accepted (PAY-4), amended by PAY-205
 
 ## Context
 PAY-4's golden-path scenario: the PSP actually authorized a payment, but its callback never reached us
@@ -11,8 +11,25 @@ asks the PSP directly.
 
 ## Decision
 
+### Amendment (PAY-205): settle stale AUTHORIZED payments, isolate failures, age by `status_changed_at`
+- **Candidates now include `AUTHORIZED`.** A payment whose SETTLED callback never arrived is polled too.
+  `PspOutcome` has no SETTLED value, so `APPROVED` for a payment that is already `AUTHORIZED` is read as
+  "captured" and the reconciler calls `Payment.settle()`. `settle()` adds the `PaymentSettled` event and
+  `PaymentRepository.save()` writes the outbox row in the same transaction (ADR-0011), so the ledger
+  eventually gets the money. `DECLINED` for an `AUTHORIZED` payment is ignored (no `AUTHORIZED → FAILED`
+  transition). A `PENDING_PSP` payment still moves one step per run (→ `AUTHORIZED`); it is settled by a
+  later run once it has been `AUTHORIZED` for `stuckThreshold`.
+- **Per-payment isolation.** Each payment has its own transaction (`tx.run` around the re-read + write) and
+  its own `try/catch (RuntimeException)` in the loop. An `OptimisticLockException` on one row (a callback
+  won the race) is logged and skipped; the rest of the batch continues and the row is retried next run.
+- **`status_changed_at` replaces `created_at` for selection.** Migration `V5` adds the column
+  (backfilled from `created_at`, `NOT NULL`, indexed with `status`). `Payment.transitionTo` sets it on every
+  transition. `stuckThreshold` and `maxAge` are now measured from the last status change: an old payment that
+  was authorized a minute ago is not "stuck", and one authorized 3 hours ago is.
+
 ### Candidate selection
 `PaymentReconciler.reconcile()` queries `PaymentRepository.findStuckPending(olderThan, newerThan)`:
+- (Age is `status_changed_at`, see the amendment above.)
 - `olderThan = now - stuckThreshold` (default **2 minutes**) — don't poll a payment that might still get
   its callback any second; give the normal callback path a fair head start.
 - `newerThan = now - maxAge` (default **24 hours**) — payments older than this are excluded from
