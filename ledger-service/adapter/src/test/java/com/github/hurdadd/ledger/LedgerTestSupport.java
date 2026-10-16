@@ -1,5 +1,6 @@
 package com.github.hurdadd.ledger;
 
+import com.github.hurdadd.application.port.out.TxRunner;
 import org.flywaydb.core.Flyway;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -27,6 +28,10 @@ public final class LedgerTestSupport {
 
     public static void truncateAll(JdbcTemplate jdbc) {
         jdbc.execute("TRUNCATE posting, journal_entry, account");
+    }
+
+    public static TxRunner txRunner(JdbcTemplate jdbc) {
+        return work -> inTransaction(jdbc, work);
     }
 
     public static void inTransaction(JdbcTemplate jdbc, Runnable action) {

@@ -11,4 +11,5 @@ public record CreatePaymentCommand(
         MerchantId merchantId,
         String idempotencyKey
 ) {
+
 }

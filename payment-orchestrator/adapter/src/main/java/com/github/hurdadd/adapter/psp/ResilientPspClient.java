@@ -6,6 +6,7 @@ import com.github.hurdadd.application.port.out.psp.AuthorizationRequest;
 import com.github.hurdadd.application.port.out.psp.PspClient;
 import com.github.hurdadd.application.port.out.psp.PspResult;
 import com.github.hurdadd.domain.PspReference;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.core.IntervalFunction;
@@ -16,7 +17,6 @@ import io.github.resilience4j.timelimiter.TimeLimiterConfig;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
 
-import java.time.Duration;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -34,28 +34,38 @@ public class ResilientPspClient implements PspClient {
     private final ExecutorService vtExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final TimeLimiter timeLimiter;
 
-    public ResilientPspClient(PspClient pspClient) {
+    public ResilientPspClient(PspClient pspClient, PspResilienceSettings settings) {
         RetryConfig retryConfig = RetryConfig.custom()
-                .maxAttempts(5)
+                .maxAttempts(settings.maxAttempts())
                 .intervalFunction(
                         IntervalFunction.ofExponentialRandomBackoff(
-                                Duration.ofMillis(100),
-                                0.2,
-                                0.5
+                                settings.initialRetryInterval(),
+                                settings.retryMultiplier(),
+                                settings.retryJitter()
                         )
                 )
-                .ignoreExceptions(PspClientException.class)
+                // Never retried:
+                // - PspClientException: a 4xx-class answer is definitive; re-asking
+                //   changes nothing, it only spends time and load
+                // - CallNotPermittedException: the breaker is OPEN and just told us
+                //   not to ask; retrying it would defeat the fail-fast the breaker
+                //   exists to provide
+                .ignoreExceptions(PspClientException.class, CallNotPermittedException.class)
                 .build();
 
         CircuitBreakerConfig circuitBreakerConfig = CircuitBreakerConfig.custom()
                 .failureRateThreshold(50)
-                .waitDurationInOpenState(Duration.ofSeconds(10))
+                .waitDurationInOpenState(settings.circuitBreakerWaitDuration())
                 .permittedNumberOfCallsInHalfOpenState(10)
                 .slidingWindow(10, 10, CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                // A 4xx-class answer is the PSP doing its job correctly: the breaker
+                // measures PSP health, not transaction approval rates. Ten declined
+                // cards in a row must not take a healthy PSP out of service.
+                .ignoreExceptions(PspClientException.class , CallNotPermittedException.class)
                 .build();
 
         TimeLimiterConfig timeLimiterConfig = TimeLimiterConfig.custom()
-                .timeoutDuration(Duration.ofMillis(500))
+                .timeoutDuration(settings.timeout())
                 .build();
 
         this.retry = Retry.of("pspClientRetry", retryConfig);
@@ -66,7 +76,8 @@ public class ResilientPspClient implements PspClient {
 
     @Override
     public PspResult authorize(AuthorizationRequest dto) {
-        return callResilient(() -> pspClient.authorize(dto), "PSP authorization failed");
+
+        return callResilientWithoutRetry(() -> pspClient.authorize(dto), "PSP authorization failed");
     }
 
     @Override
@@ -84,11 +95,29 @@ public class ResilientPspClient implements PspClient {
         Callable<PspResult> withCircuitBreaker =
                 CircuitBreaker.decorateCallable(circuitBreaker, timeLimited);
 
+
         Callable<PspResult> withRetry =
                 Retry.decorateCallable(retry, withCircuitBreaker);
 
         try {
             return withRetry.call();
+        } catch (Exception e) {
+            throw new PspException(failureMessage, e);
+        }
+    }
+
+    private PspResult callResilientWithoutRetry(Supplier<PspResult> call, String failureMessage) {
+        Supplier<CompletableFuture<PspResult>> futureSupplier =
+                () -> CompletableFuture.supplyAsync(call, vtExecutor);
+
+        Callable<PspResult> timeLimited =
+                TimeLimiter.decorateFutureSupplier(timeLimiter, futureSupplier);
+
+        Callable<PspResult> withCircuitBreaker =
+                CircuitBreaker.decorateCallable(circuitBreaker, timeLimited);
+
+        try {
+            return withCircuitBreaker.call();
         } catch (Exception e) {
             throw new PspException(failureMessage, e);
         }

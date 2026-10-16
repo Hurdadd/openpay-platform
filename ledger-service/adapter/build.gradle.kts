@@ -12,12 +12,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework:spring-aop:7.0.8")
-    implementation ("org.springframework.boot:spring-boot-starter-data-redis")
-    implementation("org.springframework.kafka:spring-kafka:4.1.0")
+    // Boot 4 moved Kafka auto-configuration (KafkaTemplate, listener factory, spring.kafka.*) out of spring-kafka
+    implementation("org.springframework.boot:spring-boot-starter-kafka")
     api(project(":ledger-service:application"))
-    compileOnly("org.projectlombok:lombok:1.18.46")
+    compileOnly("org.projectlombok:lombok:1.18.48")
     runtimeOnly("org.postgresql:postgresql")
-    annotationProcessor("org.projectlombok:lombok:1.18.46")
+    annotationProcessor("org.projectlombok:lombok:1.18.48")
     testCompileOnly("org.projectlombok:lombok")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(platform("org.testcontainers:testcontainers-bom:2.0.5"))
@@ -26,6 +26,8 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-kafka")
     testRuntimeOnly("com.h2database:h2")
     testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
+    testImplementation("org.springframework.kafka:spring-kafka-test")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.5.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

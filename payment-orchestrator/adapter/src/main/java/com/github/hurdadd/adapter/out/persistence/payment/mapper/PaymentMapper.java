@@ -26,6 +26,7 @@ public class PaymentMapper {
                 , MerchantId.from(entity.getMerchantId())
                 , entity.getStatus()
                 , entity.getCreatedAt()
+                , entity.getStatusChangedAt()
                 , entity.getVersion()
                 , pspReference(entity));
     }
@@ -36,6 +37,7 @@ public class PaymentMapper {
                 .merchantId(payment.getMerchantId().getValue())
                 .paymentId(payment.getPaymentId().getValue())
                 .status(payment.getPaymentStatus())
+                .statusChangedAt(payment.getStatusChangedAt())
                 .version(payment.getVersion())
                 .pspReference(payment.getPspReference() == null ? null : payment.getPspReference().value())
                 .build();

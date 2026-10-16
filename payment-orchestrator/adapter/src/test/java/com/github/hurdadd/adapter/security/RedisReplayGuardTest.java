@@ -82,4 +82,13 @@ class RedisReplayGuardTest {
                 now.minus(RedisReplayGuard.WINDOW).minusSeconds(1)
         ));
     }
+
+    @Test
+    void redis_down_fails_open() {
+        Instant now = Instant.parse("2026-09-23T10:00:00Z");
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        when(redis.opsForValue()).thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("down"));
+
+        assertFalse(new RedisReplayGuard(redis, Clock.fixed(now, ZoneOffset.UTC)).isReplay("psp-a", "n", now));
+    }
 }

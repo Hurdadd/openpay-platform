@@ -2,8 +2,8 @@ package com.github.hurdadd.adapter.out.persistence.idempotency;
 
 
 import jakarta.persistence.Column;
+import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -20,9 +20,8 @@ import java.time.Instant;
 @Builder
 public class IdempotencyEntity {
 
-    @Id
-    @Column(name = "idempotency_key", nullable = false, unique = true)
-    private String idempotencyKey;
+    @EmbeddedId
+    private IdempotencyId id;
     @Column(name = "body_hash", nullable = false)
     private String bodyHash;
     @Column(name = "response")
@@ -31,4 +30,6 @@ public class IdempotencyEntity {
     private String response;
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+    @Column(name = "expires_at", nullable = false)
+    private Instant expiresAt;
 }

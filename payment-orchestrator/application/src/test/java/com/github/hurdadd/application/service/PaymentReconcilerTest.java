@@ -23,6 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class PaymentReconcilerTest {
 
+    static final com.github.hurdadd.application.port.out.TxRunner DIRECT = new com.github.hurdadd.application.port.out.TxRunner() {
+        public <T> T inTx(java.util.function.Supplier<T> w) { return w.get(); }
+    };
+
     static class InMemoryPaymentRepository implements PaymentRepository {
         final Map<UUID, Payment> byId = new HashMap<>();
 
@@ -30,8 +34,13 @@ class PaymentReconcilerTest {
             byId.put(payment.getPaymentId().getValue(), payment);
         }
 
+        UUID failSaveFor;
+
         @Override
         public Payment save(Payment payment) {
+            if (payment.getPaymentId().getValue().equals(failSaveFor)) {
+                throw new IllegalStateException("simulated optimistic lock failure");
+            }
             byId.put(payment.getPaymentId().getValue(), payment);
             return payment;
         }
@@ -49,9 +58,11 @@ class PaymentReconcilerTest {
         @Override
         public List<Payment> findStuckPending(Instant olderThan, Instant newerThan) {
             return byId.values().stream()
-                    .filter(p -> p.getPaymentStatus() == PaymentStatus.PENDING_PSP)
-                    .filter(p -> !p.getCreatedAt().isAfter(olderThan))
-                    .filter(p -> !p.getCreatedAt().isBefore(newerThan))
+                    .filter(p -> p.getPaymentStatus() == PaymentStatus.PENDING_PSP
+                            || p.getPaymentStatus() == PaymentStatus.AUTHORIZED
+                            || (p.getPaymentStatus() == PaymentStatus.CREATED && p.getPspReference() != null))
+                    .filter(p -> !p.getStatusChangedAt().isAfter(olderThan))
+                    .filter(p -> !p.getStatusChangedAt().isBefore(newerThan))
                     .toList();
         }
     }
@@ -76,8 +87,8 @@ class PaymentReconcilerTest {
 
     private Payment stuckPayment(Instant createdAt, PspReference ref) {
         Payment payment = Payment.create(new Money(new BigDecimal("50.00"), Currency.USD),
-                MerchantId.from(UUID.randomUUID()));
-        payment.markPending(ref);
+                MerchantId.from(UUID.randomUUID()), ref);
+        payment.markPending();
         return Payment.reconstitute(payment.getMoney(), payment.getPaymentId(), payment.getMerchantId(),
                 PaymentStatus.PENDING_PSP, createdAt, 0, ref);
     }
@@ -103,7 +114,7 @@ class PaymentReconcilerTest {
         repository.seed(stuckPayment(createdAt, ref));
 
         PspClient pspSaysApproved = new StubPspClient(PspOutcome.APPROVED);
-        PaymentReconciler reconciler = new PaymentReconciler(repository, pspSaysApproved, clock, stuckThreshold, maxAge);
+        PaymentReconciler reconciler = new PaymentReconciler(repository, pspSaysApproved, clock, stuckThreshold, maxAge, DIRECT);
 
         reconciler.reconcile();
 
@@ -122,7 +133,7 @@ class PaymentReconcilerTest {
         InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
         repository.seed(stuckPayment(createdAt, ref));
 
-        PaymentReconciler reconciler = new PaymentReconciler(repository, new StubPspClient(PspOutcome.APPROVED), clock, stuckThreshold, maxAge);
+        PaymentReconciler reconciler = new PaymentReconciler(repository, new StubPspClient(PspOutcome.APPROVED), clock, stuckThreshold, maxAge, DIRECT);
         reconciler.reconcile();
 
         assertEquals(PaymentStatus.PENDING_PSP, repository.byId.values().iterator().next().getPaymentStatus());
@@ -139,9 +150,90 @@ class PaymentReconcilerTest {
         InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
         repository.seed(stuckPayment(createdAt, ref));
 
-        PaymentReconciler reconciler = new PaymentReconciler(repository, new StubPspClient(PspOutcome.TIMEOUT), clock, stuckThreshold, maxAge);
+        PaymentReconciler reconciler = new PaymentReconciler(repository, new StubPspClient(PspOutcome.TIMEOUT), clock, stuckThreshold, maxAge, DIRECT);
         reconciler.reconcile();
 
         assertEquals(PaymentStatus.PENDING_PSP, repository.byId.values().iterator().next().getPaymentStatus());
+    }
+
+    private Payment crashedBeforeTx2(Instant createdAt, PspReference ref) {
+        return Payment.reconstitute(new Money(new BigDecimal("50.00"), Currency.USD), PaymentId.from(UUID.randomUUID()),
+                MerchantId.from(UUID.randomUUID()), PaymentStatus.CREATED, createdAt, 0, ref);
+    }
+
+    // PAY-203: crash between TX1 and TX2 leaves CREATED + reference; the PSP may have authorized it
+    @Test
+    void created_payment_with_reference_is_reconciled_to_authorized() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(crashedBeforeTx2(clock.instant().minusSeconds(121), new PspReference("psp-ref-crash")));
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.APPROVED), clock,
+                Duration.ofMinutes(2), Duration.ofHours(24), DIRECT).reconcile();
+
+        assertEquals(PaymentStatus.AUTHORIZED, repository.byId.values().iterator().next().getPaymentStatus());
+    }
+
+    @Test
+    void created_payment_with_reference_is_failed_when_psp_declined() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(crashedBeforeTx2(clock.instant().minusSeconds(121), new PspReference("psp-ref-crash")));
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.DECLINED), clock,
+                Duration.ofMinutes(2), Duration.ofHours(24), DIRECT).reconcile();
+
+        assertEquals(PaymentStatus.FAILED, repository.byId.values().iterator().next().getPaymentStatus());
+    }
+
+    private Payment authorizedPayment(Instant statusChangedAt, Instant createdAt, PspReference ref) {
+        return Payment.reconstitute(new Money(new BigDecimal("50.00"), Currency.USD), PaymentId.from(UUID.randomUUID()),
+                MerchantId.from(UUID.randomUUID()), PaymentStatus.AUTHORIZED, createdAt, statusChangedAt, 0, ref);
+    }
+
+    // PAY-205: a stale AUTHORIZED payment is polled and taken to SETTLED
+    @Test
+    void stale_authorized_payment_is_settled_and_emits_event() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(authorizedPayment(clock.instant().minusSeconds(121), clock.instant().minusSeconds(500), new PspReference("psp-ref-auth")));
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.APPROVED), clock,
+                Duration.ofMinutes(2), Duration.ofHours(24), DIRECT).reconcile();
+
+        Payment settled = repository.byId.values().iterator().next();
+        assertEquals(PaymentStatus.SETTLED, settled.getPaymentStatus());
+        assertEquals(1, settled.pullEvents().size());
+    }
+
+    // PAY-205: candidate age is measured from status_changed_at — an old payment that changed status recently is left alone
+    @Test
+    void old_payment_with_recent_status_change_is_not_a_candidate() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(authorizedPayment(clock.instant().minusSeconds(10), clock.instant().minus(Duration.ofHours(3)), new PspReference("psp-ref-recent")));
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.APPROVED), clock,
+                Duration.ofMinutes(2), Duration.ofHours(24), DIRECT).reconcile();
+
+        assertEquals(PaymentStatus.AUTHORIZED, repository.byId.values().iterator().next().getPaymentStatus());
+    }
+
+    // PAY-205: one payment failing (e.g. OptimisticLockException on save) must not stop the others
+    @Test
+    void failure_on_one_payment_does_not_stop_the_batch() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        Payment poisoned = authorizedPayment(clock.instant().minusSeconds(121), clock.instant().minusSeconds(500), new PspReference("psp-ref-1"));
+        Payment healthy = authorizedPayment(clock.instant().minusSeconds(121), clock.instant().minusSeconds(500), new PspReference("psp-ref-2"));
+        repository.seed(poisoned);
+        repository.seed(healthy);
+        repository.failSaveFor = poisoned.getPaymentId().getValue();
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.APPROVED), clock,
+                Duration.ofMinutes(2), Duration.ofHours(24), DIRECT).reconcile();
+
+        // (the in-memory repo shares objects, so the poisoned row's rollback is not asserted here; the point is the loop kept going)
+        assertEquals(PaymentStatus.SETTLED, repository.byId.get(healthy.getPaymentId().getValue()).getPaymentStatus());
     }
 }

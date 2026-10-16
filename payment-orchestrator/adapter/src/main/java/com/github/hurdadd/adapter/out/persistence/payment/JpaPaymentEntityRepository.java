@@ -18,11 +18,12 @@ public interface JpaPaymentEntityRepository extends JpaRepository<PaymentEntity,
 
     @Query("""
             SELECT p FROM PaymentEntity p
-            WHERE p.status = :status
-              AND p.createdAt <= :olderThan
-              AND p.createdAt >= :newerThan
+            WHERE p.status IN :statuses
+              AND p.pspReference IS NOT NULL
+              AND p.statusChangedAt <= :olderThan
+              AND p.statusChangedAt >= :newerThan
             """)
-    List<PaymentEntity> findStuck(@Param("status") PaymentStatus status,
+    List<PaymentEntity> findStuck(@Param("statuses") List<PaymentStatus> statuses,
                                    @Param("olderThan") Instant olderThan,
                                    @Param("newerThan") Instant newerThan);
 }

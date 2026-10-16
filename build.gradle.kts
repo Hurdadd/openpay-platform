@@ -14,8 +14,14 @@ subprojects {
 
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
+            languageVersion = JavaLanguageVersion.of(27)
         }
+    }
+
+    tasks.withType<JavaCompile>().configureEach {
+        // Spring resolves @PathVariable/@RequestParam/@RequestHeader names from bytecode
+        // parameter names. Without -parameters these must be spelled out in every annotation.
+        options.compilerArgs.add("-parameters")
     }
 
     repositories {

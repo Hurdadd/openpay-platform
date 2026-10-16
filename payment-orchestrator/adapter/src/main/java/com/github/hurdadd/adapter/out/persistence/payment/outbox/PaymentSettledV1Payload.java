@@ -1,6 +1,5 @@
 package com.github.hurdadd.adapter.out.persistence.payment.outbox;
 
-import java.time.Instant;
 import java.util.UUID;
 
 public record PaymentSettledV1Payload(
@@ -8,7 +7,7 @@ public record PaymentSettledV1Payload(
         UUID merchantId,
         long amountMinor,
         String currency,
-        Instant settledAt
+        String settledAt  // ISO-8601; plain String so Hibernate's JSON mapper needs no java.time module
 ) {}
 
 
