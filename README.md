@@ -689,7 +689,9 @@ Listed on purpose.
 - An *early* callback (e.g. `SETTLED` while still `PENDING_PSP`) is acknowledged and dropped instead of being rejected for redelivery.
 - The replay nonce is recorded before processing, so a failed processing attempt cannot be retried with the same nonce.
 - The ledger consumer has no dead-letter topic; a poison message is logged and skipped after the default retries.
-- Idempotency keys are global, not scoped per merchant, and never expire.
+- Idempotency keys are scoped per merchant and expire (PAY-303, migration V6), but a crash between the two create transactions leaves a key without a stored response; a replay in that window is answered with `503 + Retry-After` until the reconciler settles the payment (see ADR-0014).
+- Unit/adapter tests run on H2 in PostgreSQL mode; only the e2e suite and the ledger tests exercise real PostgreSQL behaviour.
+- Build versions are not fully aligned: the Boot plugin is 4.0.7 while the bootstrap modules import the 4.1.0 BOM, and the local Kafka broker image is 3.9 while the clients are 4.x.
 - The outbox publisher sends synchronously inside the DB transaction; one failed send re-publishes the whole batch (safe because consumers are idempotent, but wasteful).
 - Single PostgreSQL instance hosts both databases for local development; the logical boundary is the database, not the server.
 
