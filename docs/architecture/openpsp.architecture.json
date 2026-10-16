@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "OpenPSP \u00b7 From payment intent to ledger",
+    "locale": "en",
+    "output": "outputs/openpsp/architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Hurdadd/openpay-platform.git",
+      "revision": "78a204a785b85ccc7b3b03fcefbecfed9f0b10d6",
+      "provider": "github",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    {
+      "id": "merchant",
+      "type": "external",
+      "label": "Merchant client",
+      "sublabel": "POST /payments",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        185,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/in/web/payment/PaymentController.java",
+          "line": 1,
+          "end_line": 67,
+          "label": "REST entry point"
+        }
+      ]
+    },
+    {
+      "id": "orchestrator",
+      "type": "backend",
+      "label": "Payment orchestrator",
+      "sublabel": "REST \u00b7 callbacks \u00b7 outbox :8080",
+      "pos": [
+        435,
+        300
+      ],
+      "size": [
+        270,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/in/web/payment/PaymentController.java",
+          "line": 1,
+          "end_line": 67,
+          "label": "Create payment"
+        },
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/psp/callback/PspCallbackController.java",
+          "line": 1,
+          "end_line": 82,
+          "label": "Callback verification"
+        },
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/out/messaging/outbox/OutboxPublisher.java",
+          "line": 1,
+          "end_line": 63,
+          "label": "Outbox to Kafka"
+        }
+      ]
+    },
+    {
+      "id": "payment-db",
+      "type": "database",
+      "label": "Payment database",
+      "sublabel": "PostgreSQL \u00b7 openpay",
+      "pos": [
+        435,
+        90
+      ],
+      "size": [
+        270,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/out/persistence/payment/JpaPaymentEntityImpl.java",
+          "line": 1,
+          "end_line": 51,
+          "label": "Payment persistence"
+        },
+        {
+          "path": "payment-orchestrator/adapter/src/main/resources/application.yml",
+          "line": 1,
+          "end_line": 35,
+          "label": "Database configuration"
+        },
+        {
+          "path": "payment-orchestrator/adapter/src/main/resources/db/migration/V4__payment_outbox.sql",
+          "line": 1,
+          "end_line": 13,
+          "label": "Outbox table"
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "security",
+      "label": "Replay guard",
+      "sublabel": "Redis \u00b7 nonce TTL 5 min",
+      "pos": [
+        40,
+        90
+      ],
+      "size": [
+        185,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/security/RedisReplayGuard.java",
+          "line": 1,
+          "end_line": 48,
+          "label": "Nonce ownership"
+        }
+      ]
+    },
+    {
+      "id": "psp-stub",
+      "type": "external",
+      "label": "Local PSP stub",
+      "sublabel": "SlowPsp via Resilience4j",
+      "pos": [
+        950,
+        300
+      ],
+      "size": [
+        245,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/application/src/main/java/com/github/hurdadd/application/service/PaymentReconciler.java",
+          "line": 1,
+          "end_line": 87,
+          "label": "Status polling"
+        },
+        {
+          "path": "payment-orchestrator/bootstrap/src/main/java/com/github/hurdadd/PspConfig.java",
+          "line": 1,
+          "end_line": 20,
+          "label": "Configured local stub"
+        },
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/psp/SlowPsp.java",
+          "line": 1,
+          "end_line": 33,
+          "label": "Simulated responses"
+        }
+      ],
+      "tag": "No create-flow authorization"
+    },
+    {
+      "id": "callback-caller",
+      "type": "external",
+      "label": "PSP callback caller",
+      "sublabel": "Signed raw-body callback",
+      "pos": [
+        950,
+        90
+      ],
+      "size": [
+        230,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/psp/callback/PspCallbackController.java",
+          "line": 1,
+          "end_line": 82,
+          "label": "External callback contract"
+        }
+      ]
+    },
+    {
+      "id": "kafka",
+      "type": "messagebus",
+      "label": "Settlement stream",
+      "sublabel": "Kafka \u00b7 payment-events",
+      "pos": [
+        435,
+        535
+      ],
+      "size": [
+        270,
+        76
+      ],
+      "sources": [
+        {
+          "path": "payment-orchestrator/adapter/src/main/java/com/github/hurdadd/adapter/out/messaging/outbox/OutboxPublisher.java",
+          "line": 1,
+          "end_line": 63,
+          "label": "Producer"
+        },
+        {
+          "path": "ledger-service/adapter/src/main/java/com/github/hurdadd/adapter/in/messaging/PaymentSettledListener.java",
+          "line": 1,
+          "end_line": 21,
+          "label": "Consumer"
+        }
+      ],
+      "tag": "PaymentSettled.v1"
+    },
+    {
+      "id": "ledger",
+      "type": "backend",
+      "label": "Ledger service",
+      "sublabel": "Consumer group: ledger-service",
+      "pos": [
+        950,
+        535
+      ],
+      "size": [
+        245,
+        76
+      ],
+      "sources": [
+        {
+          "path": "ledger-service/adapter/src/main/java/com/github/hurdadd/adapter/in/messaging/PaymentSettledListener.java",
+          "line": 1,
+          "end_line": 21,
+          "label": "Record before acknowledgment"
+        },
+        {
+          "path": "ledger-service/adapter/src/main/java/com/github/hurdadd/adapter/application/RecordLedgerEntryService.java",
+          "line": 1,
+          "end_line": 79,
+          "label": "Balanced journal transaction"
+        },
+        {
+          "path": "ledger-service/adapter/src/main/java/com/github/hurdadd/adapter/out/persistence/ledger/JdbcLedgerRepository.java",
+          "line": 1,
+          "end_line": 66,
+          "label": "Event ID deduplication"
+        }
+      ]
+    },
+    {
+      "id": "ledger-db",
+      "type": "database",
+      "label": "Ledger database",
+      "sublabel": "PostgreSQL \u00b7 openpay_ledger",
+      "pos": [
+        950,
+        750
+      ],
+      "size": [
+        245,
+        76
+      ],
+      "sources": [
+        {
+          "path": "ledger-service/adapter/src/main/resources/application.yml",
+          "line": 1,
+          "end_line": 25,
+          "label": "Separate logical database"
+        },
+        {
+          "path": "ledger-service/adapter/src/main/resources/db/migration/V2__ledger_append_only_guard.sql",
+          "line": 1,
+          "end_line": 23,
+          "label": "Append-only guards"
+        },
+        {
+          "path": "ledger-service/adapter/src/main/resources/db/migration/V4__enforce_complete_balanced_journal.sql",
+          "line": 1,
+          "end_line": 41,
+          "label": "Commit-time balance check"
+        }
+      ],
+      "tag": "Append-only \u00b7 sum = 0"
+    }
+  ],
+  "connections": [
+    {
+      "id": "submit",
+      "from": "merchant",
+      "to": "orchestrator",
+      "label": "Idempotency-Key",
+      "variant": "emphasis"
+    },
+    {
+      "id": "persist",
+      "from": "orchestrator",
+      "to": "payment-db",
+      "label": "Payments + outbox reads"
+    },
+    {
+      "id": "nonce",
+      "from": "orchestrator",
+      "to": "redis",
+      "label": "Nonce SET NX",
+      "variant": "security"
+    },
+    {
+      "id": "poll",
+      "from": "orchestrator",
+      "to": "psp-stub",
+      "label": "Poll stuck PENDING_PSP",
+      "variant": "dashed"
+    },
+    {
+      "id": "callback",
+      "from": "callback-caller",
+      "to": "orchestrator",
+      "label": "HMAC + replay checks",
+      "variant": "security"
+    },
+    {
+      "id": "publish",
+      "from": "orchestrator",
+      "to": "kafka",
+      "label": "Existing outbox rows only",
+      "variant": "dashed"
+    },
+    {
+      "id": "consume",
+      "from": "kafka",
+      "to": "ledger",
+      "label": "Record, then acknowledge",
+      "variant": "emphasis"
+    },
+    {
+      "id": "journal",
+      "from": "ledger",
+      "to": "ledger-db",
+      "label": "Deduplicate eventId"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "01 \u00b7 Payment intent",
+      "items": [
+        "A new idempotency key creates a payment in CREATED.",
+        "The create use case does not call the PSP yet.",
+        "Merchant UUID binding remains an HTTP integration gap."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "02 \u00b7 The missing bridge",
+      "items": [
+        "Callback transitions save the payment, but create no outbox row.",
+        "Kafka publication needs an existing unpublished row.",
+        "The map shows current code, not a completed payment journey."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "03 \u00b7 Durable accounting",
+      "items": [
+        "One journal entry per eventId; redelivery is a no-op.",
+        "Clearing debit + merchant payable credit sum to zero.",
+        "PostgreSQL rejects incomplete journals and UPDATE / DELETE."
+      ]
+    }
+  ]
+}

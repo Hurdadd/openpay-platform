@@ -8,6 +8,8 @@ The design goal is that it doesn't, and the failure-injection suite checks that 
 
 ![Java 27](https://img.shields.io/badge/Java-27-blue) ![Spring Boot 4](https://img.shields.io/badge/Spring%20Boot-4.0-green) ![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-blue) ![Kafka KRaft](https://img.shields.io/badge/Kafka-3.9%20KRaft-black)
 
+More: [interactive architecture map](docs/architecture/README.md) · [engineering reference](docs/engineering.md) (older snapshot, see note inside) · [design decisions](docs/adr/README.md)
+
 ---
 
 ## Table of contents
