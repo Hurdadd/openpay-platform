@@ -75,8 +75,9 @@ public final class Payment {
     }
 
     public void markPending(){
-        transitionTo(PaymentStatus.PENDING_PSP);
+        // validate before mutating: a payment without a reference must not change state
         Objects.requireNonNull(pspReference, "pspReference cannot be null");
+        transitionTo(PaymentStatus.PENDING_PSP);
     }
 
 

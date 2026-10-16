@@ -35,6 +35,9 @@ public class PaymentOutboxEntity {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "claimed_at")
+    private Instant claimedAt;
+
     protected PaymentOutboxEntity() {
     }
 
@@ -50,6 +53,10 @@ public class PaymentOutboxEntity {
         this.published = false;
         this.payload = payload;
         this.createdAt = Instant.now();
+    }
+
+    public void claim(Instant at) {
+        this.claimedAt = at;
     }
 
     public void markPublished(Instant publishedAt) {

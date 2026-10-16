@@ -1,5 +1,6 @@
 package com.github.bootstrap;
 
+import com.github.hurdadd.adapter.out.persistence.lock.JdbcSchedulerLock;
 import com.github.hurdadd.application.port.out.PaymentRepository;
 import com.github.hurdadd.application.port.out.TxRunner;
 import com.github.hurdadd.application.port.out.psp.PspClient;
@@ -30,20 +31,36 @@ public class ReconcilerConfig {
     }
 
     @Bean
-    ReconcilerScheduler reconcilerScheduler(PaymentReconciler reconciler) {
-        return new ReconcilerScheduler(reconciler);
+    ReconcilerScheduler reconcilerScheduler(PaymentReconciler reconciler,
+                                            JdbcSchedulerLock lock,
+                                            @Value("${reconciler.lock-lease:5m}") Duration lockLease) {
+        return new ReconcilerScheduler(reconciler, lock, lockLease);
     }
 
     static class ReconcilerScheduler {
-        private final PaymentReconciler reconciler;
+        private static final String LOCK_NAME = "reconciler";
 
-        ReconcilerScheduler(PaymentReconciler reconciler) {
+        private final PaymentReconciler reconciler;
+        private final JdbcSchedulerLock lock;
+        private final Duration lockLease;
+
+        ReconcilerScheduler(PaymentReconciler reconciler, JdbcSchedulerLock lock, Duration lockLease) {
             this.reconciler = reconciler;
+            this.lock = lock;
+            this.lockLease = lockLease;
         }
 
+        // with several instances only the one holding the lock polls the PSP this round
         @Scheduled(fixedDelayString = "${reconciler.poll-interval}")
         void run() {
-            reconciler.reconcile();
+            if (!lock.tryAcquire(LOCK_NAME, lockLease)) {
+                return;
+            }
+            try {
+                reconciler.reconcile();
+            } finally {
+                lock.release(LOCK_NAME);
+            }
         }
     }
 }

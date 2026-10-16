@@ -2,6 +2,7 @@ package com.github.hurdadd.ledger;
 
 import com.github.domain.JournalEntry;
 import com.github.domain.Posting;
+import com.github.hurdadd.adapter.out.persistence.ledger.ConflictingRedeliveryException;
 import com.github.hurdadd.adapter.out.persistence.ledger.JdbcLedgerRepository;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -62,6 +63,24 @@ class LedgerRepositoryTest {
         assertEquals(2, LedgerTestSupport.count(jdbc, "posting"));
         assertEquals(10000, LedgerTestSupport.balanceOf(jdbc, clearing));
         assertEquals(-10000, LedgerTestSupport.balanceOf(jdbc, merchant));
+    }
+
+    @Test
+    void same_key_with_a_different_amount_is_rejected_not_silently_dropped() {
+        var clearing = repository.ensureAccount("psp_clearing", "CLEARING", "IRR");
+        var merchant = repository.ensureAccount("merchant:m-1", "MERCHANT_PAYABLE", "IRR");
+        var original = new JournalEntry(
+                List.of(new Posting(10000, clearing.toString()), new Posting(-10000, merchant.toString())),
+                "Settlement test", Currency.getInstance("IRR"));
+        var tampered = new JournalEntry(
+                List.of(new Posting(99999, clearing.toString()), new Posting(-99999, merchant.toString())),
+                "Settlement test", Currency.getInstance("IRR"));
+
+        LedgerTestSupport.inTransaction(jdbc, () -> repository.save(original, "evt-1"));
+
+        assertThrows(ConflictingRedeliveryException.class,
+                () -> LedgerTestSupport.inTransaction(jdbc, () -> repository.save(tampered, "evt-1")));
+        assertEquals(10000, LedgerTestSupport.balanceOf(jdbc, clearing));
     }
 
     @Test

@@ -17,7 +17,7 @@ import java.util.Map;
  * {@link ResilientPspClient} wraps this class and owns that policy.
  * <p>
  * Contract: {@code POST /authorize} and {@code GET /status/{pspReference}}, both answering
- * {@code {"outcome":"APPROVED|DECLINED|TIMEOUT"}}. A 4xx is a definitive answer (never retried,
+ * {@code {"outcome":"APPROVED|DECLINED|TIMEOUT|REVERSED"}}. A 4xx is a definitive answer (never retried,
  * never counted by the breaker); anything else propagates as a runtime failure = outcome unknown.
  */
 public class HttpPspClient implements PspClient {

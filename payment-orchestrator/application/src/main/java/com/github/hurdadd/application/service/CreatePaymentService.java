@@ -109,7 +109,9 @@ public class CreatePaymentService implements CreatePaymentUseCase {
                     payment.authorize();
                 }
                 case DECLINED -> payment.fail();
-                case TIMEOUT -> payment.markPending();
+                // a PSP cannot reverse something it has just been asked to authorize; treat it as unknown
+                // and let the reconciler ask again with the same reference
+                case TIMEOUT, REVERSED -> payment.markPending();
             }
             payment = repository.save(payment);
         }

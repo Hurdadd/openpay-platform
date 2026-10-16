@@ -105,6 +105,7 @@ public class PaymentReconciler {
             case AUTHORIZED -> payment.authorize();
             case FAILED -> payment.fail();
             case SETTLED -> payment.settle(); // writes the outbox row in the same transaction via save()
+            case REVERSED -> payment.reverse(); // only legal from AUTHORIZED; guarded by canTransitionTo above
             default -> throw new IllegalStateException("Unexpected reconciler target status " + resolved);
         }
         paymentRepository.save(payment);
@@ -115,6 +116,7 @@ public class PaymentReconciler {
         return switch (outcome) {
             case APPROVED -> current == PaymentStatus.AUTHORIZED ? PaymentStatus.SETTLED : PaymentStatus.AUTHORIZED;
             case DECLINED -> PaymentStatus.FAILED;
+            case REVERSED -> PaymentStatus.REVERSED;
             case TIMEOUT -> throw new IllegalStateException("TIMEOUT is filtered before the write");
         };
     }

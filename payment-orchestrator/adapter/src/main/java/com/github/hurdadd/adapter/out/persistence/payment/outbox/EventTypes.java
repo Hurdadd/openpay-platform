@@ -1,8 +1,8 @@
 package com.github.hurdadd.adapter.out.persistence.payment.outbox;
 
 public enum EventTypes {
-    PAYMENT_SETTLED_V1("PaymentSettled.v1"),
-    PAYMENT_FAILED_V1("PaymentFailed.v1");
+    // Only settlements are published: a failed payment moves no money, so the ledger has nothing to record
+    PAYMENT_SETTLED_V1("PaymentSettled.v1");
 
     private final String wireFormat;
     EventTypes(String wireFormat) {

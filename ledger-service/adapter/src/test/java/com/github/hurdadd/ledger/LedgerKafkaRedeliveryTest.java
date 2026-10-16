@@ -15,10 +15,9 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.testcontainers.kafka.ConfluentKafkaContainer;
+import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.time.Duration;
@@ -30,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@Disabled("Needs a Kafka broker image; this environment's registry blocks kafka images (apache/kafka RBAC-denied, confluent pull too slow). Runs in CI. AC5 is covered meanwhile by RecordLedgerEntryServiceTest double-processing on real Postgres plus PaymentSettledListenerTest ack ordering.")
 class LedgerKafkaRedeliveryTest {
     static final String TOPIC = "ledger-redelivery-test";
     static final String GROUP = "ledger-redelivery";
@@ -44,7 +42,7 @@ class LedgerKafkaRedeliveryTest {
             {"eventId":"33333333-3333-3333-3333-333333333333","eventType":"PaymentSettled.v1","data":{"paymentId":"%s","merchantId":"22222222-2222-2222-2222-222222222222","amountMinor":10000,"currency":"IRR","settledAt":"2026-09-21T10:00:00Z"}}"""
             .formatted(PAYMENT);
 
-    static ConfluentKafkaContainer kafka = new ConfluentKafkaContainer("confluentinc/cp-kafka:7.9.0");
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:4.0.0");
     static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
 
     static JdbcTemplate jdbc;

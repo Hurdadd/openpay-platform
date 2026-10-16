@@ -206,6 +206,33 @@ class PaymentReconcilerTest {
         assertEquals(1, settled.pullEvents().size());
     }
 
+    // the PSP reversed an authorized payment and no callback arrived: the poll must pick it up
+    @Test
+    void authorized_payment_reversed_at_the_psp_is_reconciled_to_reversed() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(authorizedPayment(clock.instant().minusSeconds(121), clock.instant().minusSeconds(500), new PspReference("psp-ref-reversed")));
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.REVERSED), clock,
+                Duration.ofMinutes(2), Duration.ofHours(24), DIRECT).reconcile();
+
+        assertEquals(PaymentStatus.REVERSED, repository.byId.values().iterator().next().getPaymentStatus());
+    }
+
+    // REVERSED is only legal from AUTHORIZED; a payment that never got authorized must not jump there
+    @Test
+    void reversed_answer_for_a_pending_payment_is_ignored() {
+        Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneOffset.UTC);
+        Duration stuckThreshold = Duration.ofMinutes(2);
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(stuckPayment(clock.instant().minus(stuckThreshold).minusSeconds(1), new PspReference("psp-ref-odd")));
+
+        new PaymentReconciler(repository, new StubPspClient(PspOutcome.REVERSED), clock,
+                stuckThreshold, Duration.ofHours(24), DIRECT).reconcile();
+
+        assertEquals(PaymentStatus.PENDING_PSP, repository.byId.values().iterator().next().getPaymentStatus());
+    }
+
     // PAY-205: candidate age is measured from status_changed_at — an old payment that changed status recently is left alone
     @Test
     void old_payment_with_recent_status_change_is_not_a_candidate() {

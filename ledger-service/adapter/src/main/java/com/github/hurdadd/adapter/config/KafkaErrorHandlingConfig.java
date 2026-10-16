@@ -5,6 +5,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaOperations;
+import com.github.hurdadd.adapter.out.persistence.ledger.ConflictingRedeliveryException;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.BackOff;
@@ -31,7 +32,9 @@ public class KafkaErrorHandlingConfig {
         var recoverer = new DeadLetterPublishingRecoverer(
                 template, (record, ex) -> new TopicPartition(record.topic() + DLT_SUFFIX, -1));
         var handler = new DefaultErrorHandler(recoverer, backOff);
-        handler.addNotRetryableExceptions(UnprocessableMessageException.class, IllegalArgumentException.class);
+        // a redelivery that contradicts what is stored will not fix itself on retry: dead-letter it at once
+        handler.addNotRetryableExceptions(UnprocessableMessageException.class, IllegalArgumentException.class,
+                ConflictingRedeliveryException.class);
         // ack-mode manual: without this the offset of a dead-lettered record is never committed
         handler.setCommitRecovered(true);
         return handler;

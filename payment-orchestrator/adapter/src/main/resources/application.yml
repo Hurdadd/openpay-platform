@@ -59,6 +59,7 @@ idempotency:
 outbox:
   kafka:
     topic: payment-events
+  claim-lease: 60s   # a claimed-but-unmarked row is re-sent after this long (publisher crashed)
 
 server:
   port: 8080

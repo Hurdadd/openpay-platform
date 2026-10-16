@@ -44,6 +44,7 @@ class IdempotencyStoreTest {
     @Autowired JpaIdempotencyEntityRepository repository;
     @Autowired IdempotencyKeyCleaner cleaner;
     @Autowired jakarta.persistence.EntityManager em;
+    @Autowired org.springframework.transaction.PlatformTransactionManager txManager;
 
     private void expire(MerchantId m) {
         em.createNativeQuery("UPDATE idempotency_keys SET expires_at = ? WHERE merchant_id = ?")
@@ -63,6 +64,38 @@ class IdempotencyStoreTest {
         // (not read back as Duplicate: H2 double-encodes the JSON column, Postgres jsonb does not)
         assertNotNull(repository.findById(new IdempotencyId(a.getValue(), "k")).orElseThrow().getResponse());
         assertInstanceOf(InFlight.class, store.tryInsert(b, "k", "h2"));
+    }
+
+    /** The claim the resume makes: ten simultaneous requests with one key admit exactly one. */
+    @Test
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void ten_concurrent_requests_with_the_same_key_admit_exactly_one() throws Exception {
+        MerchantId m = merchant();
+        int threads = 10;
+        var barrier = new java.util.concurrent.CyclicBarrier(threads);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        var results = new java.util.ArrayList<java.util.concurrent.Future<Object>>();
+        for (int i = 0; i < threads; i++) {
+            String hash = i % 2 == 0 ? "body-a" : "body-b"; // half of the callers send a different body
+            results.add(pool.submit(() -> {
+                barrier.await();
+                // each caller is its own transaction, as in production (TX1 of the create flow)
+                return new org.springframework.transaction.support.TransactionTemplate(txManager)
+                        .execute(status -> store.tryInsert(m, "race", hash));
+            }));
+        }
+        long admitted = 0;
+        for (var f : results) {
+            Object r = f.get();
+            if (r instanceof New) admitted++;
+            else org.junit.jupiter.api.Assertions.assertTrue(r instanceof InFlight || r instanceof Conflict,
+                    "a loser must see in-flight or conflict, got " + r);
+        }
+        pool.shutdown();
+
+        assertEquals(1, admitted);
+        new org.springframework.transaction.support.TransactionTemplate(txManager).executeWithoutResult(status ->
+                em.createNativeQuery("DELETE FROM idempotency_keys WHERE merchant_id = ?").setParameter(1, m.getValue()).executeUpdate());
     }
 
     @Test

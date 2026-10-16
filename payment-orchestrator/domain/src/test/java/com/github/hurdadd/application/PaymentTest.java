@@ -33,6 +33,15 @@ public class PaymentTest {
     }
 
     @Test
+    void mark_pending_without_a_reference_fails_and_leaves_the_status_untouched() {
+        Payment p = Payment.reconstitute(new Money(new BigDecimal("10000"), Currency.IRR), PaymentId.from(UUID.randomUUID()),
+                MerchantId.from(UUID.randomUUID()), PaymentStatus.CREATED, java.time.Instant.now(), 0, null);
+
+        assertThrows(NullPointerException.class, p::markPending);
+        assertEquals(PaymentStatus.CREATED, p.getPaymentStatus());
+    }
+
+    @Test
     void settled_cannot_go_back_to_pending() {
         Payment p = paymentHelper();
         p.markPending();
