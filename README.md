@@ -515,7 +515,7 @@ All values come from `application.yml` (`psp.resilience`), never from code:
 
 ### Prerequisites
 
-- JDK 21
+- JDK 27 (Gradle toolchain; only needed to run outside Docker)
 - Docker with Compose v2
 
 ### Run the infrastructure
@@ -534,6 +534,8 @@ docker compose up -d --build   # also starts payment-orchestrator :8080 and ledg
 ./scripts/demo.sh              # create payment -> signed callback -> ledger balance
 ```
 
+If ports 5432, 8080 or 8081 are already taken on your machine, remap them, e.g. `POSTGRES_PORT=55432 ORCHESTRATOR_PORT=18080 LEDGER_PORT=18081 docker compose up -d` and run the demo with `API=http://localhost:18080 ./scripts/demo.sh`.
+
 ### Run the services
 
 ```bash
@@ -543,7 +545,7 @@ docker compose up -d --build   # also starts payment-orchestrator :8080 and ledg
 
 ### Try it
 
-> The create request below works today and returns `201`. The PSP call is still not wired into the create flow, so a created payment stays in `CREATED` and the callback finds no matching payment yet.
+> The create request authorizes against the in-process `SlowPsp` simulator and returns `201` with status `AUTHORIZED`. The callback below then settles it, and the ledger entry appears a moment later via the outbox and Kafka.
 
 Create a payment:
 
@@ -564,13 +566,19 @@ curl -i localhost:8080/payments/<paymentId>   # 200, or 404 with application/pro
 
 Errors follow RFC 9457: a malformed body or a missing `Idempotency-Key` is `400`; a body that parses but breaks a constraint (or a domain rule, such as `amount: 0`) is `422`.
 
+Look up the PSP reference the orchestrator generated for it:
+
+```bash
+docker compose exec postgres psql -U openpay -d openpay -tA -c "SELECT psp_reference FROM payments WHERE payment_id = '<paymentId>'"
+```
+
 Send a signed PSP callback:
 
 ```bash
 SECRET=dev-secret-change-me
 TS=$(date +%s)
 NONCE=$(uuidgen)
-BODY='{"pspReference":"<psp-ref>","status":"AUTHORIZED"}'
+BODY='{"pspReference":"<psp-ref>","status":"SETTLED"}'
 SIG=$(printf '%s.%s.%s' "$TS" "$NONCE" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
 curl -i -X POST localhost:8080/callbacks/psp/slow-psp \
