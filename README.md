@@ -515,7 +515,7 @@ All values come from `application.yml` (`psp.resilience`), never from code:
 
 ### Prerequisites
 
-- JDK 21
+- JDK 27 (Gradle toolchain; only needed to run outside Docker)
 - Docker with Compose v2
 
 ### Run the infrastructure
@@ -534,6 +534,8 @@ docker compose up -d --build   # also starts payment-orchestrator :8080 and ledg
 ./scripts/demo.sh              # create payment -> signed callback -> ledger balance
 ```
 
+If ports 5432, 8080 or 8081 are already taken on your machine, remap them, e.g. `POSTGRES_PORT=55432 ORCHESTRATOR_PORT=18080 LEDGER_PORT=18081 docker compose up -d` and run the demo with `API=http://localhost:18080 ./scripts/demo.sh`.
+
 ### Run the services
 
 ```bash
@@ -543,7 +545,7 @@ docker compose up -d --build   # also starts payment-orchestrator :8080 and ledg
 
 ### Try it
 
-> The create request below works today and returns `201`. The PSP call is still not wired into the create flow, so a created payment stays in `CREATED` and the callback finds no matching payment yet.
+> The create request authorizes against the in-process `SlowPsp` simulator and returns `201` with status `AUTHORIZED`. The callback below then settles it, and the ledger entry appears a moment later via the outbox and Kafka.
 
 Create a payment:
 
@@ -564,13 +566,19 @@ curl -i localhost:8080/payments/<paymentId>   # 200, or 404 with application/pro
 
 Errors follow RFC 9457: a malformed body or a missing `Idempotency-Key` is `400`; a body that parses but breaks a constraint (or a domain rule, such as `amount: 0`) is `422`.
 
+Look up the PSP reference the orchestrator generated for it:
+
+```bash
+docker compose exec postgres psql -U openpay -d openpay -tA -c "SELECT psp_reference FROM payments WHERE payment_id = '<paymentId>'"
+```
+
 Send a signed PSP callback:
 
 ```bash
 SECRET=dev-secret-change-me
 TS=$(date +%s)
 NONCE=$(uuidgen)
-BODY='{"pspReference":"<psp-ref>","status":"AUTHORIZED"}'
+BODY='{"pspReference":"<psp-ref>","status":"SETTLED"}'
 SIG=$(printf '%s.%s.%s' "$TS" "$NONCE" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
 curl -i -X POST localhost:8080/callbacks/psp/slow-psp \
@@ -689,7 +697,9 @@ Listed on purpose.
 - An *early* callback (e.g. `SETTLED` while still `PENDING_PSP`) is acknowledged and dropped instead of being rejected for redelivery.
 - The replay nonce is recorded before processing, so a failed processing attempt cannot be retried with the same nonce.
 - The ledger consumer has no dead-letter topic; a poison message is logged and skipped after the default retries.
-- Idempotency keys are global, not scoped per merchant, and never expire.
+- Idempotency keys are scoped per merchant and expire (PAY-303, migration V6), but a crash between the two create transactions leaves a key without a stored response; how a replay in that window should behave is an open product decision (see `docs/notes/PAY-203-handoff.md`).
+- Unit/adapter tests run on H2 in PostgreSQL mode; only the e2e suite and the ledger tests exercise real PostgreSQL behaviour.
+- Build versions are not fully aligned: the Boot plugin is 4.0.7 while the bootstrap modules import the 4.1.0 BOM, and the local Kafka broker image is 3.9 while the clients are 4.x.
 - The outbox publisher sends synchronously inside the DB transaction; one failed send re-publishes the whole batch (safe because consumers are idempotent, but wasteful).
 - Single PostgreSQL instance hosts both databases for local development; the logical boundary is the database, not the server.
 
