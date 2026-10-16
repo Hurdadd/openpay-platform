@@ -1,3 +1,5 @@
+> **Note:** this reference was written before PAY-203 and PAY-305. Where it disagrees with the [README](../README.md) (create flow calling the PSP, outbox in the same transaction, ledger `application` module, failure-injection suite, Java 27), the README is current.
+
 # OpenPSP engineering reference
 
 > This preserves the detailed design from commit `78a204a`. Diagrams labelled target flow describe intended integration. For the current implementation map and entry point, see the [project introduction](../README.md) and [architecture notes](architecture/README.md).

@@ -1,5 +1,5 @@
 rootProject.name = "openpay-platform"
-include("payment-orchestrator" , "psp-gateway" , "ledger-service")
+include("payment-orchestrator", "ledger-service", "e2e-tests")
 include("payment-orchestrator:domain")
 include("payment-orchestrator:application")
 include("payment-orchestrator:adapter")

@@ -1,7 +1,8 @@
 package com.github.hurdadd.ledger;
 
-import com.github.hurdadd.adapter.application.RecordLedgerEntryService;
 import com.github.hurdadd.adapter.out.persistence.ledger.JdbcLedgerRepository;
+import com.github.hurdadd.application.port.in.RecordLedgerEntryCommand;
+import com.github.hurdadd.application.service.RecordLedgerEntryService;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -19,11 +20,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
+import java.util.Currency;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,6 +35,10 @@ class LedgerKafkaRedeliveryTest {
     static final String TOPIC = "ledger-redelivery-test";
     static final String GROUP = "ledger-redelivery";
     static final String PAYMENT = "11111111-1111-1111-1111-111111111111";
+
+    static final RecordLedgerEntryCommand COMMAND = new RecordLedgerEntryCommand(
+            UUID.fromString("33333333-3333-3333-3333-333333333333"), UUID.fromString(PAYMENT),
+            UUID.fromString("22222222-2222-2222-2222-222222222222"), Currency.getInstance("IRR"), 10000);
 
     static final String ENVELOPE = """
             {"eventId":"33333333-3333-3333-3333-333333333333","eventType":"PaymentSettled.v1","data":{"paymentId":"%s","merchantId":"22222222-2222-2222-2222-222222222222","amountMinor":10000,"currency":"IRR","settledAt":"2026-09-21T10:00:00Z"}}"""
@@ -49,7 +55,7 @@ class LedgerKafkaRedeliveryTest {
         kafka.start();
         postgres.start();
         jdbc = LedgerTestSupport.migratedJdbcTemplate(postgres);
-        service = new RecordLedgerEntryService(new JdbcLedgerRepository(jdbc), new ObjectMapper());
+        service = new RecordLedgerEntryService(new JdbcLedgerRepository(jdbc), LedgerTestSupport.txRunner(jdbc));
 
         try (var admin = AdminClient.create(
                 Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers()))) {
@@ -77,14 +83,14 @@ class LedgerKafkaRedeliveryTest {
             consumer.subscribe(List.of(TOPIC));
             var records = consumer.poll(Duration.ofSeconds(60));
             assertEquals(1, records.count());
-            service.record(records.iterator().next().value());
+            service.record(COMMAND);
         }
 
         try (var consumer = newConsumer()) {
             consumer.subscribe(List.of(TOPIC));
             var records = consumer.poll(Duration.ofSeconds(60));
             assertEquals(1, records.count());
-            service.record(records.iterator().next().value());
+            service.record(COMMAND);
             consumer.commitSync();
         }
 

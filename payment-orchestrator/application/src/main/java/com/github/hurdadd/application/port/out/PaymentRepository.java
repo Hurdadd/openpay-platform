@@ -16,7 +16,7 @@ public interface PaymentRepository {
      Optional<Payment> findById(PaymentId paymentId);
      Optional<Payment> findByPspReference(PspReference pspReference);
 
-     // PENDING_PSP payments older than `olderThan` and younger than `newerThan` (the age cap) — reconciler's candidate pool
+     // CREATED/PENDING_PSP/AUTHORIZED payments with a psp reference whose status last changed before `olderThan` and after `newerThan` (the age cap) — reconciler's candidate pool
      List<Payment> findStuckPending(Instant olderThan, Instant newerThan);
 
 }

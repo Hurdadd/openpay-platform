@@ -52,6 +52,10 @@ public class PaymentEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Setter
+    @Column(name = "status_changed_at", nullable = false)
+    private Instant statusChangedAt;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;

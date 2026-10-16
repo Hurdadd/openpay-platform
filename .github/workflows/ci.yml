@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "27"
       - name: Validate Compose
         run: docker compose config
       - name: Build payment-orchestrator adapter
@@ -21,3 +21,5 @@ jobs:
         run: ./gradlew :ledger-service:adapter:build --console=plain
       - name: Build runnable bootstraps
         run: ./gradlew :payment-orchestrator:bootstrap:build :ledger-service:bootstrap:build --console=plain
+      - name: End-to-end tests
+        run: ./gradlew :e2e-tests:test --console=plain

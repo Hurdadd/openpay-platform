@@ -6,6 +6,13 @@ spring:
     url: ${PAYMENT_DB_URL:jdbc:postgresql://localhost:5432/openpay}
     username: ${PAYMENT_DB_USERNAME:openpay}
     password: ${PAYMENT_DB_PASSWORD:openpay}
+    hikari:
+      # a saturated or slow database must fail a request fast (503), not park it: pool wait 1s,
+      # a dead/black-holed socket 5s. Healthy statements run in single-digit ms.
+      connection-timeout: 1000
+      data-source-properties:
+        socketTimeout: 5
+        connectTimeout: 2
 
   data:
     redis:
@@ -21,11 +28,33 @@ spring:
 psp:
   secrets:
     slow-psp: ${SLOW_PSP_SECRET:dev-secret-change-me}
+  resilience:
+    # PSP call budget — full table in README ("Resilience and timeout budget").
+    #   authorize:    1 attempt × 1000ms = 1000ms (no retry — a timeout is *unknown*, not *failed*)
+    #   checkStatus:  2 × 1000ms + worst-case backoff 150ms = 2150ms (background, off the 3s SLA path)
+    # timeout must stay above the PSP's real p99 latency (SlowPsp ≈ 800ms);
+    # lower it and healthy-but-slow PSPs get spurious timeouts — their own mini retry storm.
+    timeout: 1000ms
+    max-attempts: 2
+    initial-retry-interval: 100ms
+    retry-multiplier: 2.0
+    retry-jitter: 0.5
+    circuit-breaker-wait-duration: 10s
+
+tx:
+  # use-case transactions only (the PSP call is outside them): well inside the 3s SLA, see README timeout budget
+  timeout-seconds: 2
 
 reconciler:
   stuck-threshold: 2m
   poll-interval: 30s
   max-age: 24h
+
+idempotency:
+  ttl: 24h
+  cleanup:
+    interval: 1h
+    batch-size: 500
 
 outbox:
   kafka:

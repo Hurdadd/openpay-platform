@@ -50,8 +50,8 @@ class PspCallbackServiceTest {
 
     private Payment pendingPayment(PspReference ref) {
         Payment payment = Payment.create(new Money(new BigDecimal("100.00"), Currency.USD),
-                MerchantId.from(UUID.randomUUID()));
-        payment.markPending(ref);
+                MerchantId.from(UUID.randomUUID()), ref);
+        payment.markPending();
         return payment;
     }
 
@@ -60,7 +60,9 @@ class PspCallbackServiceTest {
         PspReference ref = new PspReference("psp-ref-1");
         InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
         repository.seed(pendingPayment(ref));
-        PspCallbackService service = new PspCallbackService(repository);
+        PspCallbackService service = new PspCallbackService(repository, new com.github.hurdadd.application.port.out.TxRunner() {
+            public <T> T inTx(java.util.function.Supplier<T> w) { return w.get(); }
+        });
 
         service.handle(ref, PaymentStatus.AUTHORIZED);
         service.handle(ref, PaymentStatus.AUTHORIZED);
@@ -71,14 +73,16 @@ class PspCallbackServiceTest {
     }
 
     @Test
-    void out_of_order_callback_is_ignored_not_applied() {
+    void stale_callback_is_noop_and_not_applied() {
         PspReference ref = new PspReference("psp-ref-2");
         InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
         Payment payment = pendingPayment(ref);
         payment.authorize();
         payment.settle();
         repository.seed(payment);
-        PspCallbackService service = new PspCallbackService(repository);
+        PspCallbackService service = new PspCallbackService(repository, new com.github.hurdadd.application.port.out.TxRunner() {
+            public <T> T inTx(java.util.function.Supplier<T> w) { return w.get(); }
+        });
 
         // a stale AUTHORIZED callback arrives after we already reached the terminal SETTLED state
         service.handle(ref, PaymentStatus.AUTHORIZED);
@@ -88,11 +92,30 @@ class PspCallbackServiceTest {
     }
 
     @Test
-    void unknown_reference_does_not_throw_out_of_the_handler() {
+    void unknown_reference_throws_not_found_for_the_controller_to_acknowledge() {
         InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
-        PspCallbackService service = new PspCallbackService(repository);
+        PspCallbackService service = new PspCallbackService(repository, new com.github.hurdadd.application.port.out.TxRunner() {
+            public <T> T inTx(java.util.function.Supplier<T> w) { return w.get(); }
+        });
 
         org.junit.jupiter.api.Assertions.assertThrows(PaymentNotFoundException.class,
                 () -> service.handle(new PspReference("unknown"), PaymentStatus.AUTHORIZED));
+    }
+
+    @Test
+    void early_callback_is_rejected_so_psp_retries() {
+        PspReference ref = new PspReference("psp-ref-3");
+        InMemoryPaymentRepository repository = new InMemoryPaymentRepository();
+        repository.seed(pendingPayment(ref));
+        PspCallbackService service = new PspCallbackService(repository, new com.github.hurdadd.application.port.out.TxRunner() {
+            public <T> T inTx(java.util.function.Supplier<T> w) { return w.get(); }
+        });
+
+        // SETTLED arrives while we are still PENDING_PSP (AUTHORIZED not seen yet)
+        org.junit.jupiter.api.Assertions.assertThrows(OutOfOrderCallbackException.class,
+                () -> service.handle(ref, PaymentStatus.SETTLED));
+
+        assertEquals(PaymentStatus.PENDING_PSP, repository.findByPspReference(ref).orElseThrow().getPaymentStatus());
+        assertEquals(0, repository.saveCount);
     }
 }

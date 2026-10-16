@@ -14,7 +14,7 @@ public class PaymentTest {
     private Payment paymentHelper(){
         Money m = new Money(new BigDecimal("10000") , Currency.IRR);
         MerchantId merchantId = MerchantId.from(UUID.randomUUID());
-        return Payment.create(m , merchantId);
+        return Payment.create(m , merchantId, new PspReference("psp-ref-1"));
     }
 
     @Test
@@ -22,7 +22,7 @@ public class PaymentTest {
         Payment p = paymentHelper();
         assertEquals(PaymentStatus.CREATED, p.getPaymentStatus());
 
-        p.markPending(new PspReference("psp-ref-1"));
+        p.markPending();
         assertEquals(PaymentStatus.PENDING_PSP, p.getPaymentStatus());
 
         p.authorize();
@@ -35,10 +35,10 @@ public class PaymentTest {
     @Test
     void settled_cannot_go_back_to_pending() {
         Payment p = paymentHelper();
-        p.markPending(new PspReference("psp-ref-1"));
+        p.markPending();
         p.authorize();
         p.settle();
-        assertThrows(IllegalStateException.class, () -> p.markPending(new PspReference("psp-ref-2")));
+        assertThrows(IllegalStateException.class, () -> p.markPending());
 
     }
 
@@ -46,5 +46,27 @@ public class PaymentTest {
     void created_cannot_settle_directly() {
         Payment p = paymentHelper();
         assertThrows(IllegalStateException.class, p::settle);
+    }
+
+    @Test
+    void settle_records_exactly_one_event_and_pulling_drains_it() {
+        Payment p = paymentHelper();
+        p.markPending();
+        p.authorize();
+        assertEquals(0, p.pullEvents().size());
+
+        p.settle();
+
+        var events = p.pullEvents();
+        assertEquals(1, events.size());
+        assertEquals(p.getPaymentId(), ((PaymentSettled) events.get(0)).paymentId());
+        assertEquals(0, p.pullEvents().size());
+    }
+
+    @Test
+    void failed_settle_records_no_event() {
+        Payment p = paymentHelper();
+        assertThrows(IllegalStateException.class, p::settle);
+        assertEquals(0, p.pullEvents().size());
     }
 }

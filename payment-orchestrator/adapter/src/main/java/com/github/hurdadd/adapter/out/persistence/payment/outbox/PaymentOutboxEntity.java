@@ -18,12 +18,12 @@ public class PaymentOutboxEntity {
     @Column(name = "payment_id", nullable = false, updatable = false)
     private UUID paymentId;
 
-    @Convert(converter= EventTypeConverter.class)
+    // stored as the wire string: an enum-typed column makes Hibernate emit a CHECK that H2 rejects in tests
     @Column(name = "event_type", nullable = false, length = 100, updatable = false)
-    private EventTypes eventType;
+    private String eventType;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "payload", nullable = false, columnDefinition = "jsonb", updatable = false)
+    @Column(name = "payload", nullable = false, updatable = false)
     private PaymentSettledV1Payload payload;
 
     @Column(name = "published", nullable = false)
@@ -46,7 +46,7 @@ public class PaymentOutboxEntity {
     ) {
         this.id = id;
         this.paymentId = paymentId;
-        this.eventType = eventType;
+        this.eventType = eventType.wireFormat();
         this.published = false;
         this.payload = payload;
         this.createdAt = Instant.now();
@@ -62,7 +62,7 @@ public class PaymentOutboxEntity {
     }
 
     public EventTypes getEventType() {
-        return eventType;
+        return EventTypes.fromWireFormat(eventType);
     }
 
     public UUID getPaymentId() {

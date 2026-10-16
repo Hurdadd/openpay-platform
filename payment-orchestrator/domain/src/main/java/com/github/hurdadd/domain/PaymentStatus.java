@@ -27,4 +27,9 @@ public enum PaymentStatus {
     public boolean canTransitionTo(PaymentStatus target) {
         return transitions.contains(target);
     }
+
+    // true if target is a legal step now or after some further legal steps (e.g. PENDING_PSP -> SETTLED via AUTHORIZED)
+    public boolean canReach(PaymentStatus target) {
+        return transitions.contains(target) || transitions.stream().anyMatch(next -> next.canReach(target));
+    }
 }

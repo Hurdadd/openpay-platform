@@ -12,3 +12,8 @@
 | [0008](0008-wire-minor-units-and-event-envelope.md) | Minor-unit amounts and enveloped events on the wire | PAY-6 |
 | [0009](0009-jdbc-ledger-writes-and-deterministic-accounts.md) | JdbcTemplate writes and deterministic accounts for the ledger | PAY-6 |
 | [0010](0010-append-only-db-enforcement.md) | Append-only enforced in the database, not just in code | PAY-6 |
+| [0011](0011-transactional-outbox-polling-vs-cdc.md) | Transactional outbox: write path, `@Transactional` pitfalls, polling vs CDC | PAY-204 |
+| [0012](0012-two-services-vs-modular-monolith.md) | Two services, not a modular monolith | PAY-206 |
+| [0013](0013-replay-guard-redis-failure-mode.md) | Callback ordering (early vs stale) and fail-open replay guard | PAY-301 |
+| [0014](0014-idempotency-in-postgres-not-redis.md) | Idempotency in Postgres (merchant-scoped, TTL, in-flight 409), not Redis | PAY-303 |
+| [0015](0015-database-timeouts-and-503.md) | Bounded database waits: pool/socket/transaction timeouts, `503` on storage trouble | PAY-305 |

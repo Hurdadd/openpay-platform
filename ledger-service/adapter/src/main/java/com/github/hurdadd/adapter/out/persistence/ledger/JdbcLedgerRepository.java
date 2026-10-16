@@ -1,7 +1,7 @@
 package com.github.hurdadd.adapter.out.persistence.ledger;
 
 import com.github.domain.JournalEntry;
-import com.github.hurdadd.adapter.application.port.out.LedgerRepository;
+import com.github.hurdadd.application.port.out.LedgerRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 

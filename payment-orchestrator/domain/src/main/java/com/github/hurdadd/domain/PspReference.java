@@ -12,4 +12,9 @@ public record PspReference(
         }
 
     }
+
+    // minted before the PSP call and sent to it as its idempotency key
+    public static PspReference generate() {
+        return new PspReference("psp_" + java.util.UUID.randomUUID());
+    }
 }

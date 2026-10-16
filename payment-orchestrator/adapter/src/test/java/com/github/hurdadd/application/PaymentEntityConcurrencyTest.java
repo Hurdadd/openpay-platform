@@ -40,6 +40,7 @@ class PaymentEntityConcurrencyTest {
                         .status(PaymentStatus.CREATED)
                         .amount(BigDecimal.valueOf(100))
                         .currency(Currency.USD)
+                        .statusChangedAt(java.time.Instant.now())
                         .build()
         );
 

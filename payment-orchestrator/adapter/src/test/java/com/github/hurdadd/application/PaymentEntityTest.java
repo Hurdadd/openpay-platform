@@ -36,6 +36,7 @@ class PaymentEntityTest {
                 .status(PaymentStatus.CREATED)
                 .amount(BigDecimal.valueOf(10000))
                 .currency(Currency.USD)
+                .statusChangedAt(java.time.Instant.now())
                 .build();
 
         repository.saveAndFlush(paymentEntity);
