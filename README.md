@@ -6,7 +6,7 @@ An open-source payment orchestrator built to answer one question under failure:
 
 The design goal is that it doesn't. A payment flows from an idempotent REST API, through an explicit state machine and a resilient PSP adapter, into a transactional outbox, over Kafka, and into a double-entry ledger whose invariants are enforced by the database itself.
 
-![Java 21](https://img.shields.io/badge/Java-21-blue) ![Spring Boot 4](https://img.shields.io/badge/Spring%20Boot-4.0-green) ![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-blue) ![Kafka KRaft](https://img.shields.io/badge/Kafka-3.9%20KRaft-black)
+![Java 27](https://img.shields.io/badge/Java-27-blue) ![Spring Boot 4](https://img.shields.io/badge/Spring%20Boot-4.0-green) ![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-blue) ![Kafka KRaft](https://img.shields.io/badge/Kafka-3.9%20KRaft-black)
 
 ---
 
@@ -22,6 +22,7 @@ The design goal is that it doesn't. A payment flows from an idempotent REST API,
 8. [Resilience and timeout budget](#resilience-and-timeout-budget)
 9. [Getting started](#getting-started)
 10. [Testing](#testing)
+    - [Failure injection](#failure-injection)
 11. [Project layout](#project-layout)
 12. [Architecture Decision Records](#architecture-decision-records)
 13. [Known limitations](#known-limitations)
@@ -35,14 +36,16 @@ This project is in progress. The table is kept honest: a component is ✅ only w
 | Component | Status | Notes |
 |---|---|---|
 | Payment aggregate + state machine | ✅ | Framework-free domain module; illegal transitions throw |
-| Idempotent `POST /payments` (key + SHA-256 body hash, 409 on mismatch) | 🚧 | Store logic tested; HTTP binding of `merchantId` is being fixed |
+| Idempotent `POST /payments` (key + SHA-256 body hash, 409 on mismatch) | ✅ | DTO + mapper boundary; 201/replay/409/400/422 covered by `@WebMvcTest` |
+| `GET /payments/{id}` current status, 404 when unknown | ✅ | `GetPaymentUseCase` + `ProblemDetail` advice |
+| RFC 9457 `ProblemDetail` errors (400 / 404 / 422) | ✅ | `@RestControllerAdvice`; broken JSON 400, validation + domain 422 |
 | Optimistic locking (`@Version`) | ✅ | Concurrent-thread test |
-| PSP adapter — retry, circuit breaker, time limiter | 🚧 | Implemented; not yet called from the create flow; backoff config being corrected |
-| HMAC-verified PSP callbacks + Redis replay guard | ✅ / 🚧 | Verified & tested; ordering of replay-mark vs processing being fixed |
-| Reconciler for payments stuck in `PENDING_PSP` | ✅ / 🚧 | Tested in isolation; becomes live once the PSP call is wired |
-| Transactional outbox → Kafka publisher | 🚧 | Publisher done (`acks=all`, idempotent producer, `SKIP LOCKED`); writing the outbox row in the state-change transaction is in progress |
+| PSP adapter — HTTP client, retry, circuit breaker, time limiter | ✅ | `HttpPspClient` (set `psp.base-url`) behind `ResilientPspClient`: `authorize` single attempt (no retry — a timeout is *unknown*), `checkStatus` retried (read-only); proven against a slow PSP in [`PaymentMoneyPathE2eTest`](e2e-tests/src/test/java/com/github/hurdadd/e2e/PaymentMoneyPathE2eTest.java) |
+| HMAC-verified PSP callbacks + Redis replay guard | ✅ | Bad signature → 401, replayed delivery acknowledged but not re-applied; also covered end to end ([`PaymentMoneyPathE2eTest`](e2e-tests/src/test/java/com/github/hurdadd/e2e/PaymentMoneyPathE2eTest.java), scenario 2) |
+| Reconciler for payments stuck in `CREATED`/`PENDING_PSP`/`AUTHORIZED` | ✅ | Settles stale `AUTHORIZED`; per-payment tx + error isolation; selects by `status_changed_at` (ADR-0006) |
+| Transactional outbox → Kafka publisher | ✅ | Transactional outbox to Kafka: state change and event committed atomically; publisher scales with `SKIP LOCKED` |
 | Double-entry ledger (DB-enforced balance, append-only) | ✅ | Deferred constraint triggers; redelivery test with a crashed consumer |
-| End-to-end failure-injection test | 🚧 | In progress |
+| End-to-end failure-injection test | ✅ | [`e2e-tests`](e2e-tests/): both services as containers + Postgres, Kafka, Redis and WireMock as the PSP; PSP timeout → reconciler → ledger → Kafka redelivery → idempotent replay |
 
 ---
 
@@ -117,7 +120,7 @@ flowchart LR
     subgraph "Outbound adapters"
         O1[JpaPaymentEntityImpl]
         O2[JpaIdempotencyStore]
-        O3[ResilientPspClient → SlowPsp / FlakyPsp]
+        O3[ResilientPspClient → HttpPspClient / SlowPsp / FlakyPsp]
         O4[RedisReplayGuard]
         O5[OutboxPublisher]
     end
@@ -156,11 +159,11 @@ sequenceDiagram
 
     M->>API: POST /payments (Idempotency-Key: K)
     API->>UC: CreatePaymentCommand
-    UC->>DB: BEGIN · INSERT idempotency_keys ON CONFLICT DO NOTHING
-    UC->>DB: INSERT payments (CREATED) · store response · COMMIT
-    UC->>PSP: authorize(amount, pspReference)  [outside DB tx]
-    PSP-->>UC: accepted
-    UC->>DB: UPDATE payments → PENDING_PSP (version check)
+    UC->>DB: TX1 · INSERT idempotency_keys ON CONFLICT DO NOTHING
+    UC->>DB: INSERT payments (CREATED, pspReference minted here) · COMMIT
+    UC->>PSP: authorize(amount, pspReference)  [outside DB tx, single attempt]
+    PSP-->>UC: APPROVED
+    UC->>DB: TX2 · re-read · CREATED → PENDING_PSP → AUTHORIZED · store response · COMMIT
     API-->>M: 201 {paymentId, status}
 
     PSP->>CB: callback AUTHORIZED (HMAC, ts, nonce)
@@ -193,12 +196,13 @@ sequenceDiagram
     participant DB as Postgres
     participant R as PaymentReconciler
 
+    UC->>DB: TX1 · payment CREATED + pspReference · COMMIT
     UC->>PSP: authorize (single attempt, idempotency key = pspReference)
     PSP--xUC: timeout
-    UC->>DB: status = PENDING_PSP (outcome unknown)
+    UC->>DB: TX2 · status = PENDING_PSP (outcome unknown) · store response
     Note over PSP: PSP actually approved,<br/>but its callback is lost
     loop every 30s
-        R->>DB: find PENDING_PSP older than 2m and newer than 24h
+        R->>DB: find CREATED/PENDING_PSP with a pspReference, older than 2m and newer than 24h
         R->>PSP: checkStatus(pspReference)
         alt APPROVED
             R->>DB: → AUTHORIZED
@@ -209,6 +213,8 @@ sequenceDiagram
         end
     end
 ```
+
+**Crash between TX1 and TX2:** the payment stays `CREATED` with its `pspReference`; the reconciler covers it too (`CREATED → PENDING_PSP → AUTHORIZED`, or `CREATED → FAILED`). The idempotency key exists but has no stored response yet, so a replay in that window currently surfaces `IdempotencyResponseIsNull` instead of a replayed `201`; the client retries once the reconciler has settled it and TX2 is not re-run (known gap, see below).
 
 Worst-case detection window: `stuck-threshold + poll-interval = 2m + 30s = 150s` ([ADR-0006](docs/adr/0006-reconciler-polling-design.md)).
 
@@ -456,8 +462,8 @@ Schema lives in [`docs/events/PaymentSettled.v1.json`](docs/events/PaymentSettle
 | PSP down | Circuit breaker opens, fails fast | `ResilientPspClientTest` |
 | Kafka redelivers a settled event | Unique `idempotency_key` in ledger | `LedgerKafkaRedeliveryTest` (consumer killed between DB commit and offset commit) |
 | Buggy code writes an unbalanced entry | Deferred DB trigger rolls back the transaction | `LedgerRepositoryTest` |
-| Crash between state change and publish | Transactional outbox | 🚧 in progress |
-| All of the above, end to end | Testcontainers + PSP fault injection | 🚧 in progress |
+| Crash between state change and publish | Transactional outbox | `TransactionalOutboxTest`, `OutboxPublisherTest` |
+| All of the above, end to end | Testcontainers + PSP fault injection | [`PaymentMoneyPathE2eTest`](e2e-tests/src/test/java/com/github/hurdadd/e2e/PaymentMoneyPathE2eTest.java) |
 
 Delivery semantics are **at-least-once everywhere, with idempotent receivers**. Nothing in this system claims exactly-once.
 
@@ -465,24 +471,32 @@ Delivery semantics are **at-least-once everywhere, with idempotent receivers**. 
 
 ## Resilience and timeout budget
 
-`ResilientPspClient` decorates every PSP call as `Retry( CircuitBreaker( TimeLimiter( call ) ) )`, so each retry attempt passes through the breaker and is individually time-limited ([ADR-0004](docs/adr/0004-resilience4j-programmatic-decorator.md)).
+`ResilientPspClient` decorates the two PSP calls differently ([ADR-0004](docs/adr/0004-resilience4j-programmatic-decorator.md)):
 
-| Setting | Value |
+- `authorize` — `CircuitBreaker( TimeLimiter( call ) )`: one attempt, no retry. A timeout is *unknown*, not *failed*.
+- `checkStatus` — `Retry( CircuitBreaker( TimeLimiter( call ) ) )`: a read is idempotent, so retries are free. Each retry attempt passes through the breaker and is individually time-limited.
+
+All values come from `application.yml` (`psp.resilience`), never from code:
+
+| Setting (`application.yml`) | Value |
 |---|---|
-| Time limit per attempt | 500 ms |
-| Retry attempts | 5 (not retried on `PspClientException` — 4xx-class errors) |
-| Circuit breaker | count-based window 10, opens at 50 % failures, 10 s open, 10 calls half-open |
+| Time limit per attempt (`timeout`) | 1000 ms — above SlowPsp's ≈ 800 ms p99, so healthy-but-slow is not spuriously failed |
+| Retry (`max-attempts`) | 2, `checkStatus` only — 100 ms base × 2, ±50 % jitter (worst-case wait 150 ms) |
+| Never retried | `PspClientException` (4xx-class — a definitive answer) and `CallNotPermittedException` (breaker open — retrying it would defeat fail-fast) |
+| Circuit breaker | count-based window 10, opens at 50 % failures, 10 s open (`circuit-breaker-wait-duration`), 10 calls half-open; 4xx-class answers do not count as PSP failures |
 | Reconciler | every 30 s; candidates older than 2 m, younger than 24 h |
 
-**Timeout budget (end-to-end SLA 3 s)** — target values; the resilience config is being aligned with this table:
+**Timeout budget (end-to-end SLA 3 s)** — actual config values:
 
 | Layer | Budget |
 |---|---|
 | Ingress + validation + idempotency insert | 150 ms |
 | DB transaction (create) | 150 ms |
-| PSP authorize — **single attempt**, no retry | 2,000 ms |
+| PSP authorize — single attempt, no retry (1 × 1000 ms) | 1000 ms |
 | DB update to `PENDING_PSP` | 150 ms |
-| Headroom | 550 ms |
+| Headroom | 1550 ms |
+
+`checkStatus` runs off the SLA path (reconciler polling): worst case 2 × 1000 ms + 150 ms backoff = 2150 ms — bounded, but not billed to the request.
 
 `authorize` must not be retried blindly: a timeout means *unknown*, and a retry without a PSP-side idempotency key can charge twice. `checkStatus` is a read, so retries are safe there.
 
@@ -504,6 +518,13 @@ docker compose ps
 
 This creates two databases in one PostgreSQL instance (`openpay`, `openpay_ledger`) and the `payment-events` topic with 3 partitions. Flyway migrates each schema on service start-up.
 
+### Run everything in Docker (or use `scripts/demo.sh` for an end-to-end run)
+
+```bash
+docker compose up -d --build   # also starts payment-orchestrator :8080 and ledger-service :8081
+./scripts/demo.sh              # create payment -> signed callback -> ledger balance
+```
+
 ### Run the services
 
 ```bash
@@ -513,7 +534,7 @@ This creates two databases in one PostgreSQL instance (`openpay`, `openpay_ledge
 
 ### Try it
 
-> The requests below describe the target behaviour. Until the JSON binding of `merchantId` and the PSP call in the create flow are in place, the create request is rejected and callbacks find no matching payment.
+> The create request below works today and returns `201`. The PSP call is still not wired into the create flow, so a created payment stays in `CREATED` and the callback finds no matching payment yet.
 
 Create a payment:
 
@@ -525,6 +546,14 @@ curl -i -X POST localhost:8080/payments \
 ```
 
 Send the same request again: you get the same `paymentId`, and no new row is created. Change the amount with the same key and you get `409 Conflict`.
+
+Check the current status of that payment:
+
+```bash
+curl -i localhost:8080/payments/<paymentId>   # 200, or 404 with application/problem+json
+```
+
+Errors follow RFC 9457: a malformed body or a missing `Idempotency-Key` is `400`; a body that parses but breaks a constraint (or a domain rule, such as `amount: 0`) is `422`.
 
 Send a signed PSP callback:
 
@@ -557,6 +586,8 @@ docker exec -it openpay-postgres psql -U openpay -d openpay_ledger -c \
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | both |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / `openpay-redis` | orchestrator |
 | `SLOW_PSP_SECRET` | `dev-secret-change-me` | callback HMAC |
+| `PSP_BASE_URL` | unset (in-process `SlowPsp`) | orchestrator — HTTP PSP to call |
+| `RECONCILER_STUCK_THRESHOLD` / `RECONCILER_POLL_INTERVAL` | `2m` / `30s` | orchestrator |
 
 ---
 
@@ -564,6 +595,7 @@ docker exec -it openpay-postgres psql -U openpay -d openpay_ledger -c \
 
 ```bash
 ./gradlew build     # unit + integration tests (Testcontainers needs Docker)
+./gradlew :e2e-tests:test   # end to end: builds both bootJars, runs them as containers (~1 min warm)
 ```
 
 | Level | What | Tooling |
@@ -572,7 +604,29 @@ docker exec -it openpay-postgres psql -U openpay -d openpay_ledger -c \
 | Application | Callback idempotency, reconciler decisions | JUnit 5 with in-memory ports |
 | Adapter | Optimistic locking, idempotency store, HMAC, replay guard, outbox publisher, circuit breaker | Testcontainers (PostgreSQL), Mockito |
 | Ledger | DB triggers, redelivery after crash | Testcontainers (PostgreSQL, Kafka) |
-| End-to-end | Full money path under PSP timeout + manual event re-injection | 🚧 in progress |
+| End-to-end | Full money path under PSP timeout, signed callbacks and manual Kafka re-injection | Testcontainers (2 services, PostgreSQL, Kafka, Redis), WireMock as PSP, Awaitility |
+| Failure injection | Network faults, callback misbehaviour and a hard kill, against the same stack | + Toxiproxy between the orchestrator and Postgres/Redis/Kafka, WireMock scenarios, `docker kill` |
+
+### Failure injection
+
+[`FailureInjectionE2eTest`](e2e-tests/src/test/java/com/github/hurdadd/e2e/FailureInjectionE2eTest.java) (PAY-305) runs on
+the PAY-304 stack with [Toxiproxy](https://github.com/Shopify/toxiproxy) answering to the names `postgres`, `redis` and
+`kafka` on the Docker network (Kafka also advertises itself through it, so clients cannot route around the fault).
+Under every fault the invariant is the same: **no lost or duplicated ledger entry, a single PSP charge per payment.**
+
+| Failure | Expected behaviour | Test |
+|---|---|---|
+| Postgres latency 2 s (24 concurrent creates, pool = 10) | Every caller gets `201` or `503 + Retry-After` in < 10 s — never a hang. Pool wait 1 s, socket timeout 5 s, use-case transaction timeout 2 s. Afterwards Hikari `active`/`pending` drain to 0, a new payment is created in < 3 s, retrying the same keys never produces a second payment | `postgresLatency_apiAnswersWithinBound_poolDrains_recoversAfterHeal` |
+| Kafka unreachable for 30 s | API keeps creating and settling payments; outbox rows accumulate unpublished, no ledger entries yet. After reconnect everything is published: one message per payment key, per-partition order = outbox write order, one ledger entry per payment | `kafkaDown30s_outboxAccumulates_apiKeepsWorking_thenEverythingPublishedInOrder` |
+| Redis unreachable | Fail-open per [ADR-0013](docs/adr/0013-replay-guard-redis-failure-mode.md): payments unaffected (idempotency is in Postgres, [ADR-0014](docs/adr/0014-idempotency-in-postgres-not-redis.md)); callbacks accepted without the nonce check, a literal replay is a state-machine no-op (one ledger entry); forged callbacks still `401` (HMAC) | `redisDown_failsOpenPerAdr0013_...` |
+| Duplicate callback (5 × `SETTLED` in parallel, distinct nonces) | Settles once; a race loser gets `409` (PSP retries), never `500`. One outbox row, one ledger entry | `duplicateCallbacks_sentConcurrently_settleOnce` |
+| Out-of-order callback (`SETTLED` before `AUTHORIZED`) | `409`, nothing applied, nonce released; after `AUTHORIZED` the same delivery is accepted; a stale `AUTHORIZED` afterwards is a `200` no-op | `outOfOrderCallbacks_earlySettledIsDeferred_thenOrderRestores` |
+| Missing callback (PSP "unknown" twice, then approved — WireMock scenario) | Reconciler polls until approved and settles; PSP never re-authorized | `missingCallback_pspCatchesUpAfterSeveralPolls_...` |
+| Orchestrator `SIGKILL`ed while the publisher is blocked on Kafka | Outbox rows survive; after restart all are published and each settles exactly once in the ledger. Topic is at-least-once (a duplicate message is allowed, a missing one is not) | `serviceKilledWhilePublishing_afterRestartNothingIsLost` |
+
+Not covered: a kill in the narrow window *after* Kafka acknowledged a message but *before* the outbox row commits as
+published. That produces a duplicate message, which the ledger's unique `idempotency_key` absorbs
+(`LedgerKafkaRedeliveryTest`), but it cannot be triggered deterministically from outside the process.
 
 ---
 
@@ -590,7 +644,7 @@ docker exec -it openpay-postgres psql -U openpay -d openpay_ledger -c \
 │   ├── application/
 │   ├── adapter/         Kafka listener, JDBC ledger repository, Flyway (V1–V4)
 │   └── bootstrap/
-├── psp-gateway/         placeholder, to be replaced by a PSP stub in the end-to-end tests
+├── e2e-tests/           Testcontainers end-to-end tests: both services + infra + WireMock as the PSP
 ├── docs/
 │   ├── adr/             Architecture Decision Records
 │   └── events/          event contracts

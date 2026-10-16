@@ -3,8 +3,10 @@ package com.github.hurdadd.adapter.psp.callback;
 import com.github.hurdadd.adapter.psp.callback.dto.PspCallbackRequest;
 import com.github.hurdadd.application.port.in.PspCallbackHandler;
 import com.github.hurdadd.application.port.out.security.ReplayGuard;
+import com.github.hurdadd.domain.OutOfOrderCallbackException;
 import com.github.hurdadd.domain.PaymentNotFoundException;
 import com.github.hurdadd.domain.PspReference;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,16 +59,16 @@ public class PspCallbackController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-        Instant timestamp = Instant.ofEpochSecond(timestampEpochSeconds);
-        if (replayGuard.isReplay(pspId, nonce, timestamp)) {
-            return ResponseEntity.ok().build();
-        }
-
         final PspCallbackRequest body;
         try {
             body = objectMapper.readValue(rawBody, PspCallbackRequest.class);
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().build();
+        }
+
+        Instant timestamp = Instant.ofEpochSecond(timestampEpochSeconds);
+        if (replayGuard.isReplay(pspId, nonce, timestamp)) {
+            return ResponseEntity.ok().build();
         }
 
         try {
@@ -75,6 +77,18 @@ public class PspCallbackController {
             // Verified PSP callback with an unknown reference is acknowledged.
             // Reconciliation is the recovery path for our local payment state.
             return ResponseEntity.ok().build();
+        } catch (OutOfOrderCallbackException e) {
+            // early callback: free the nonce and make the PSP retry after we have caught up
+            replayGuard.release(pspId, nonce);
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        } catch (OptimisticLockingFailureException e) {
+            // lost a race with another delivery/reconciler on the same payment: the retry will see the winner's state
+            replayGuard.release(pspId, nonce);
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        } catch (RuntimeException e) {
+            // processing failed (e.g. DB down): the retry reuses this nonce, so it must not look like a replay
+            replayGuard.release(pspId, nonce);
+            throw e;
         }
 
         return ResponseEntity.ok().build();
