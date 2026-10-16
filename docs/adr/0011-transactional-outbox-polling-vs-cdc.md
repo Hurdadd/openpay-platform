@@ -41,7 +41,7 @@ is why the project wraps with an explicit `TransactionTemplate` (visible in the 
 on proxy mechanics) and uses MANDATORY as a guard where a missing transaction would be a bug.
 
 ## Polling outbox vs Debezium/CDC
-Chosen now: **polling** (`SELECT ... FOR UPDATE SKIP LOCKED LIMIT 100`, every 5 s).
+Chosen now: **polling** (claim with `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 100` in a short transaction, send to Kafka outside any transaction, mark each row published; every 5 s).
 - Fits this scale: one table, one service, no extra infrastructure; `SKIP LOCKED` lets several
   publisher instances share the work without double-sending.
 - Cost: up to ~5 s latency, constant polling load, and a publisher crash after the Kafka ack but
