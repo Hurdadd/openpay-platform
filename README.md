@@ -709,7 +709,7 @@ Listed on purpose.
 - Outbox delivery is at-least-once: a crash between the Kafka send and the "published" mark re-sends that row after the claim lease (60 s). Per-payment ordering across several publisher instances is only guaranteed while a payment has one event type, which is true today (only `PaymentSettled.v1` is published; failures move no money and emit nothing).
 - An *early* callback (e.g. `SETTLED` while still `PENDING_PSP`) is acknowledged and dropped instead of being rejected for redelivery; the reconciler covers it.
 - The replay nonce is recorded before processing, so a failed processing attempt cannot be retried with the same nonce.
-- Idempotency keys are scoped per merchant and expire (PAY-303). A crash between the two create transactions leaves a key without a stored response; how a replay in that window should behave is an open product decision (see `docs/notes/PAY-203-handoff.md`).
+- Idempotency keys are scoped per merchant and expire (PAY-303). A crash between the two create transactions leaves a key without a stored response; how a replay in that window should behave is an open product decision.
 - Adapter tests run on H2 in PostgreSQL mode; the ledger tests and the e2e suite are the ones that exercise real PostgreSQL and Kafka.
 - Build versions are not fully aligned: the Boot plugin is 4.0.7 while the bootstrap modules import the 4.1.0 BOM, and the local Kafka broker image is 3.9 while the clients are 4.x.
 - Single PostgreSQL instance hosts both databases for local development; the logical boundary is the database, not the server.
